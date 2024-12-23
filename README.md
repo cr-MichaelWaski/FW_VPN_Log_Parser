@@ -17,12 +17,6 @@ The script processes `.log` files by:
 2. Extracting key-value pairs using regular expressions.
 3. Writing the parsed data into corresponding CSV files.
 
-### Example Log Entry:
-date=2024-12-20 time=14:56:10 eventtime=1734724570250926112 tz="-0500" logid="0101037124" type="event" subtype="vpn" level="error" vd="root" logdesc="IPsec phase 1 error" msg="IPsec phase 1 error" action="negotiate" remip=66.97.178.25 locip=12.188.176.140 remport=500 locport=500 outintf="wan1" cookies="75da2b97aacbbfef/0000000000000000" user="N/A" group="N/A" useralt="N/A" xauthuser="N/A" xauthgroup="N/A" assignip=N/A vpntunnel="N/A" status="negotiate_error" reason="peer SA proposal not match local policy" peer_notif="NOT-APPLICABLE" fctuid="N/A" advpnsc=0
-
-yaml
-Copy code
-
 ---
 
 ## Outputs
@@ -31,7 +25,7 @@ The script creates a CSV file for each log file processed. The output contains a
 ### Example Output CSV:
 | **date**       | **time**   | **eventtime**          | **tz**  | **logid**    | **type** | **subtype** | **level** | **vd**   | **logdesc**             | **msg**                | **action**   | **remip**       | **locip**      |
 |-----------------|------------|------------------------|---------|--------------|----------|-------------|-----------|----------|-------------------------|------------------------|--------------|----------------|---------------|
-| 2024-12-20     | 14:56:10   | 1734724570250926112    | -0500   | 0101037124   | event    | vpn         | error     | root     | IPsec phase 1 error     | IPsec phase 1 error    | negotiate    | 66.97.178.25   | 12.188.176.140 |
+| 2024-12-20     | 14:56:10   | 1734724570250926112    | -0500   | 0101037124   | event    | vpn         | error     | root     | IPsec phase 1 error     | IPsec phase 1 error    | negotiate    | 66.**.***.***   | 12.***.***.*** |
 
 ---
 
@@ -80,9 +74,6 @@ Field misalignment: Verify the log format matches the script’s expectations. U
 Permission errors: Ensure PowerShell has the necessary permissions to access the input and output folders.
 Contribution
 We welcome contributions to improve this tool! Feel free to open issues or submit pull requests.
-
-License
-This project is licensed under the MIT License. See the LICENSE file for details.
 
 
 
