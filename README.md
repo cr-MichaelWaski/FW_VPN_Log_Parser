@@ -1,4 +1,4 @@
-# FW_VPN_Log_Parser
+Suspicious_Connection_Analysis
 
 How to Use the Failed Connections Log in a Ransomware Investigation
 1. Identify Unauthorized Access Attempts
