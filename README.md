@@ -1,3 +1,91 @@
+# Log File Parser
+
+## Overview
+The **Log File Parser** is a PowerShell script designed to parse log files, extract key-value pairs, and convert them into structured CSV files. This tool is useful for analyzing logs in a consistent and organized format, enabling further investigation or processing.
+
+### Key Features:
+- Parses log entries with key-value pair structures.
+- Handles quoted values and trims unnecessary characters.
+- Processes multiple `.log` files in a folder concurrently using PowerShell jobs.
+- Outputs structured CSV files for easy analysis.
+
+---
+
+## How It Works
+The script processes `.log` files by:
+1. Reading each file line by line.
+2. Extracting key-value pairs using regular expressions.
+3. Writing the parsed data into corresponding CSV files.
+
+### Example Log Entry:
+date=2024-12-20 time=14:56:10 eventtime=1734724570250926112 tz="-0500" logid="0101037124" type="event" subtype="vpn" level="error" vd="root" logdesc="IPsec phase 1 error" msg="IPsec phase 1 error" action="negotiate" remip=66.97.178.25 locip=12.188.176.140 remport=500 locport=500 outintf="wan1" cookies="75da2b97aacbbfef/0000000000000000" user="N/A" group="N/A" useralt="N/A" xauthuser="N/A" xauthgroup="N/A" assignip=N/A vpntunnel="N/A" status="negotiate_error" reason="peer SA proposal not match local policy" peer_notif="NOT-APPLICABLE" fctuid="N/A" advpnsc=0
+
+yaml
+Copy code
+
+---
+
+## Outputs
+The script creates a CSV file for each log file processed. The output contains all parsed fields as separate columns, providing a structured format for analysis.
+
+### Example Output CSV:
+| **date**       | **time**   | **eventtime**          | **tz**  | **logid**    | **type** | **subtype** | **level** | **vd**   | **logdesc**             | **msg**                | **action**   | **remip**       | **locip**      |
+|-----------------|------------|------------------------|---------|--------------|----------|-------------|-----------|----------|-------------------------|------------------------|--------------|----------------|---------------|
+| 2024-12-20     | 14:56:10   | 1734724570250926112    | -0500   | 0101037124   | event    | vpn         | error     | root     | IPsec phase 1 error     | IPsec phase 1 error    | negotiate    | 66.97.178.25   | 12.188.176.140 |
+
+---
+
+## Installation
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/your-repo/log-file-parser.git
+Navigate to the directory:
+bash
+Copy code
+cd log-file-parser
+Usage
+Run the Script: Open PowerShell and execute the script:
+
+powershell
+Copy code
+.\log-file-parser.ps1
+Provide Input and Output Paths:
+
+Input: Specify the folder containing .log files to parse.
+Output: Specify the folder where the parsed CSV files will be saved.
+Monitor Progress:
+
+The script displays the file being processed and provides updates as it completes.
+Review Outputs:
+
+Open the generated CSV files to inspect the parsed data.
+Example Workflow
+Place .log files in a folder, e.g., C:\Logs.
+Run the script and provide:
+Input folder: C:\Logs
+Output folder: C:\ParsedLogs
+The script processes each .log file and creates corresponding .csv files in the output folder.
+Features in Detail
+Key-Value Pair Parsing
+Handles log entries with key-value pairs like:
+makefile
+Copy code
+key1=value1 key2="value2 with spaces" key3=value3
+Supports trimming of quotes and handling empty or missing values.
+Parallel Processing
+Uses PowerShell jobs to process multiple files concurrently, reducing processing time for large datasets.
+Troubleshooting
+No .log files found: Ensure the input folder contains .log files in the expected format.
+Field misalignment: Verify the log format matches the script’s expectations. Update the regex parsing logic if necessary.
+Permission errors: Ensure PowerShell has the necessary permissions to access the input and output folders.
+Contribution
+We welcome contributions to improve this tool! Feel free to open issues or submit pull requests.
+
+License
+This project is licensed under the MIT License. See the LICENSE file for details.
+
+
+
 # VPN Log Analysis Tool
 
 ## Overview
