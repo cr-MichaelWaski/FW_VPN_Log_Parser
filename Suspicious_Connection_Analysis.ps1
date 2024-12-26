@@ -37,7 +37,9 @@ foreach ($logFile in $logFiles) {
         # Stream-read the log file
         $reader = [System.IO.StreamReader]::new($filePath)
         while (($line = $reader.ReadLine()) -ne $null) {
-            if ($line -match 'remip=(?<remip>[^\s]+) .* status=(?<status>[^\s]+) .* srccountry=(?<srccountry>[^\s]+)') {
+            Write-Host "Processing line: $line" -ForegroundColor DarkGray  # Debug line
+
+            if ($line -match 'remip=(?<remip>[^ ]+).*status=(?<status>[^ ]+).*srccountry=(?<srccountry>[^ ]+)') {
                 $remip = $matches['remip']
                 $status = $matches['status']
                 $srccountry = $matches['srccountry']
@@ -84,7 +86,9 @@ $results = @()
 while ($jobs.Count -gt 0) {
     $completedJobs = $jobs | Where-Object { $_.State -eq 'Completed' }
     foreach ($job in $completedJobs) {
-        $results += Receive-Job -Job $job
+        $jobResult = Receive-Job -Job $job
+        Write-Host "Job result: $($jobResult | Out-String)" -ForegroundColor DarkGray  # Debug line
+        $results += $jobResult
         Remove-Job -Job $job -ErrorAction SilentlyContinue
         $jobs = $jobs | Where-Object { $_.Id -ne $job.Id }  # Remove processed jobs from the collection
     }
@@ -101,32 +105,49 @@ foreach ($result in $results) {
     $unusualIPs += $result.UnusualIPs
 
     foreach ($pair in $result.ConnectionFrequency.GetEnumerator()) {
-        if (-not $connectionFrequency.ContainsKey($pair.Key)) {
-            $connectionFrequency[$pair.Key] = $pair.Value
-        } else {
+        if ($connectionFrequency.ContainsKey($pair.Key)) {
             $connectionFrequency[$pair.Key] += $pair.Value
+        } else {
+            $connectionFrequency[$pair.Key] = $pair.Value
         }
     }
 }
 
+# Debug: Check aggregated results
+Write-Host "Failed Connections: $($failedConnections.Count)" -ForegroundColor DarkGray
+Write-Host "Unusual IPs: $($unusualIPs.Count)" -ForegroundColor DarkGray
+Write-Host "Connection Frequency: $($connectionFrequency.Count)" -ForegroundColor DarkGray
+
 # Export failed connections to CSV
-Write-Host "Exporting failed connections..." -ForegroundColor Yellow
-$failedConnectionsFile = Join-Path -Path $outputFolderPath -ChildPath "FailedConnections.csv"
-$failedConnections | Export-Csv -Path $failedConnectionsFile -NoTypeInformation
+if ($failedConnections.Count -gt 0) {
+    Write-Host "Exporting failed connections..." -ForegroundColor Yellow
+    $failedConnectionsFile = Join-Path -Path $outputFolderPath -ChildPath "FailedConnections.csv"
+    $failedConnections | Export-Csv -Path $failedConnectionsFile -NoTypeInformation
+} else {
+    Write-Host "No failed connections found." -ForegroundColor Yellow
+}
 
 # Export unusual IPs to CSV
-Write-Host "Exporting unusual IPs..." -ForegroundColor Yellow
-$unusualIPsFile = Join-Path -Path $outputFolderPath -ChildPath "UnusualIPs.csv"
-$unusualIPs | Export-Csv -Path $unusualIPsFile -NoTypeInformation
+if ($unusualIPs.Count -gt 0) {
+    Write-Host "Exporting unusual IPs..." -ForegroundColor Yellow
+    $unusualIPsFile = Join-Path -Path $outputFolderPath -ChildPath "UnusualIPs.csv"
+    $unusualIPs | Export-Csv -Path $unusualIPsFile -NoTypeInformation
+} else {
+    Write-Host "No unusual IPs found." -ForegroundColor Yellow
+}
 
 # Export connection frequency summary to CSV
-Write-Host "Exporting connection frequency..." -ForegroundColor Yellow
-$connectionFrequencyFile = Join-Path -Path $outputFolderPath -ChildPath "ConnectionFrequency.csv"
-$connectionFrequency.GetEnumerator() | ForEach-Object {
-    [PSCustomObject]@{
-        IPAddress = $_.Key
-        Attempts  = $_.Value
-    }
-} | Export-Csv -Path $connectionFrequencyFile -NoTypeInformation
+if ($connectionFrequency.Count -gt 0) {
+    Write-Host "Exporting connection frequency..." -ForegroundColor Yellow
+    $connectionFrequencyFile = Join-Path -Path $outputFolderPath -ChildPath "ConnectionFrequency.csv"
+    $connectionFrequency.GetEnumerator() | ForEach-Object {
+        [PSCustomObject]@{
+            IPAddress = $_.Key
+            Attempts  = $_.Value
+        }
+    } | Export-Csv -Path $connectionFrequencyFile -NoTypeInformation
+} else {
+    Write-Host "No connection frequency data found." -ForegroundColor Yellow
+}
 
 Write-Host "Log analysis completed successfully!" -ForegroundColor Green
