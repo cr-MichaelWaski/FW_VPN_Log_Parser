@@ -1,0 +1,27 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  SubType:string(FIELDS.subtype),
+  User:string(FIELDS.user),
+  SentBytes:int64(coalesce(FIELDS.sentbyte, 0)),
+  RcvdBytes:int64(coalesce(FIELDS.rcvdbyte, 0))
+
+filter SubType = "vpn" and not is_null(EventTime)
+
+aggregate group_by(User),
+  TotalSentB:sum(SentBytes),
+  TotalRcvdB:sum(RcvdBytes),
+  Events:count(),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime)
+
+make_col
+  SentGB:(TotalSentB/(1024*1024*1024)),
+  RcvdGB:(TotalRcvdB/(1024*1024*1024)),
+  PctSent:if((TotalSentB + TotalRcvdB) = 0, 0.0, (TotalSentB * 100.0) / (TotalSentB + TotalRcvdB))
+
+sort desc(SentGB)
+limit 20000
