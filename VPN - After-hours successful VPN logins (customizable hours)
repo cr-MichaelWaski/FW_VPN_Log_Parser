@@ -1,0 +1,28 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+// base
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  SubType:string(FIELDS.subtype),
+  Action:string(FIELDS.action),
+  User:string(FIELDS.user),
+  RemoteIP:string(FIELDS.remip)
+
+filter SubType = "vpn" and not is_null(EventTime)
+
+make_col action_l:lower(string(Action))
+filter (action_l = "tunnel-up" or action_l = "login")
+
+make_col Hour:int64(format_time(EventTime, 'HH24'))
+filter (Hour < 6 or Hour > 20)
+
+aggregate group_by(User),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime),
+  Events:count(),
+  RemoteIPs:array_agg_distinct(RemoteIP)
+
+sort desc(Events)
+limit 200
