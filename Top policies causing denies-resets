@@ -1,0 +1,16 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  PolicyID:string(FIELDS.policyid),
+  PolicyName:string(FIELDS.policyname),
+  Action:string(FIELDS.action)
+
+filter Action = "deny" or Action = "client-rst" or Action = "blocked"
+
+aggregate group_by(PolicyID, PolicyName),
+  Events:count()
+
+limit 50
+sort desc(Events)
