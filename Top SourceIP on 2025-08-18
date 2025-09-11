@@ -1,0 +1,54 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  SourceIP:string(FIELDS.srcip)
+
+filter EventTime >= parse_isotime("2025-08-18T00:00:00Z")
+  and EventTime <  parse_isotime("2025-08-19T00:00:00Z")
+  and not is_null(SourceIP)
+
+// --- Geo lookup table ---
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// --- SourceIP → Geo ---
+@src_geo <- @{
+  make_col src_net:parse_ip(SourceIP)
+  filter int64(src_net.family) = 4
+  make_col ipv4_int:int64(src_net.ip_fields[0])
+  join
+    on(ipv4_int >= @city_ipv4_v2_sq.network_start 
+    and ipv4_int <= @city_ipv4_v2_sq.network_end),
+    SrcCountry:@city_ipv4_v2_sq.country_name,
+    SrcCity:@city_ipv4_v2_sq.city_name,
+    SrcState:@city_ipv4_v2_sq.subdivision_1_name
+  statsby
+    SrcCountry:any_not_null(SrcCountry),
+    SrcCity:any_not_null(SrcCity),
+    SrcState:any_not_null(SrcState),
+    group_by(SourceIP)
+}
+
+// --- Join + Aggregate ---
+leftjoin
+  on(SourceIP=@src_geo.SourceIP),
+  SrcCountry:@src_geo.SrcCountry,
+  SrcCity:@src_geo.SrcCity,
+  SrcState:@src_geo.SrcState
+
+aggregate group_by(SourceIP, SrcCity, SrcState, SrcCountry),
+  Events:count()
+
+sort desc(Events)
+limit 200
