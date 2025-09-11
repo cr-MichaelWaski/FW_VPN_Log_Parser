@@ -1,0 +1,13 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  VPNUser:string(FIELDS.user)
+
+filter not is_null(VPNUser)
+
+aggregate group_by(VPNUser),
+  Events:count()
+
+sort desc(Events)
