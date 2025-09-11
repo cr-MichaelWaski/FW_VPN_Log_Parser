@@ -1,0 +1,22 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  DestinationIP:string(FIELDS.dstip),
+  Service:string(FIELDS.service),
+  DstPort:string(FIELDS.dstport)
+
+// SNMP events to the target
+filter DestinationIP = "10.1.4.95"
+  and (
+    lower(Service) = "snmp" or DstPort = "161" or DstPort = "162"
+  )
+  and not is_null(EventTime)
+
+// Count daily events
+aggregate group_by(Day:format_time(EventTime, 'YYYY-MM-DD')),
+  Events:count()
+
+sort asc(Day)
