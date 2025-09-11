@@ -1,0 +1,51 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+// base
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  SubType:string(FIELDS.subtype),
+  Action:string(FIELDS.action),
+  User:string(FIELDS.user),
+  RemoteIP:string(FIELDS.remip)
+
+filter SubType = "vpn" and not is_null(EventTime)
+
+make_col action_l:lower(string(Action))
+
+// geo lookup
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+@geo <- @{
+  filter not is_null(RemoteIP)
+  make_col ip:parse_ip(RemoteIP)
+  filter int64(ip.family) = 4
+  make_col ipv4:int64(ip.ip_fields[0])
+  join
+    on(ipv4 >= @city_ipv4_v2_sq.network_start and ipv4 <= @city_ipv4_v2_sq.network_end),
+    Country:@city_ipv4_v2_sq.country_name
+  statsby Country:any_not_null(Country), group_by(RemoteIP)
+}
+
+leftjoin on(RemoteIP=@geo.RemoteIP), Country:@geo.Country
+
+// successes only
+filter (action_l = "tunnel-up" or action_l = "login")
+
+aggregate group_by(User, Country),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime),
+  Events:count()
+
+sort asc(FirstSeen)
+limit 300
