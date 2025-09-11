@@ -1,0 +1,11 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  Action:string(FIELDS.action)
+
+aggregate group_by(Action),
+  Events:count()
+
+sort desc(Events)
