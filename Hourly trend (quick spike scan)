@@ -1,0 +1,11 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp))
+
+aggregate group_by(Hour:format_time(EventTime, 'YYYY-MM-DD HH24:00:00')),
+  Events:count()
+
+sort asc(Hour)
