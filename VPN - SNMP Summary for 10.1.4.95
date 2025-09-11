@@ -1,0 +1,41 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  Service:string(FIELDS.service),
+  DstPort:string(FIELDS.dstport)
+
+// Focus on SNMP traffic TO this host
+filter DestinationIP = "10.1.4.95"
+  and (
+    lower(Service) = "snmp" or DstPort = "161" or DstPort = "162"
+  )
+  and not is_null(EventTime)
+
+// Summarize SNMP usage duration + distinct sources
+aggregate group_by(DestinationIP),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime),
+  Events:count(),
+  DistinctSources:count_distinct(SourceIP),
+  Sources:array_agg_distinct(SourceIP)
+
+// Convert timestamps to readable format
+make_col
+  FirstSeenUTC:format_time(FirstSeen, 'YYYY-MM-DD HH24:MI:SS'),
+  LastSeenUTC:format_time(LastSeen, 'YYYY-MM-DD HH24:MI:SS')
+
+// Final output
+pick_col
+  DestinationIP,
+  FirstSeenUTC,
+  LastSeenUTC,
+  DistinctSources,
+  Sources,
+  Events
+
+sort asc(FirstSeenUTC)
