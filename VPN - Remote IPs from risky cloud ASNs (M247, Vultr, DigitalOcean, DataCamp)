@@ -1,0 +1,47 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+// base
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  SubType:string(FIELDS.subtype),
+  User:string(FIELDS.user),
+  RemoteIP:string(FIELDS.remip)
+
+filter SubType = "vpn" and not is_null(EventTime) and not is_null(RemoteIP)
+
+// ASN lookup (collapsed)
+@asn_ipv4_v2_sq <- @asn_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    autonomous_system_organization:last_not_null(autonomous_system_organization),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+@asn <- @{
+  make_col ip:parse_ip(RemoteIP)
+  filter int64(ip.family) = 4
+  make_col ipv4:int64(ip.ip_fields[0])
+  join
+    on(ipv4 >= @asn_ipv4_v2_sq.network_start and ipv4 <= @asn_ipv4_v2_sq.network_end),
+    ASN:@asn_ipv4_v2_sq.autonomous_system_organization
+  statsby ASN:any_not_null(ASN), group_by(RemoteIP)
+}
+
+leftjoin on(RemoteIP=@asn.RemoteIP), ASN:@asn.ASN
+
+make_col asn_l:lower(string(ASN))
+filter (contains(asn_l, "m247")
+    or contains(asn_l, "vultr")
+    or contains(asn_l, "digitalocean"))
+   // or contains(asn_l, "datacamp"))
+
+aggregate group_by(ASN, RemoteIP),
+  Events:count(),
+  Users:count_distinct(User)
+
+sort desc(Events)
+limit 300
