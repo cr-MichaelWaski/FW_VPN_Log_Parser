@@ -1,0 +1,106 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  observe_timestamp:parse_isotime(string(FIELDS.BUNDLE_TIMESTAMP)),   // cast for efficiency
+  FIELDS:FIELDS,
+  source_ip:string(FIELDS.remip)
+
+filter not is_null(source_ip)   // guard before parse_ip
+
+make_col network_obj:parse_ip(source_ip)
+
+@asn_ipv4_v2_sq <- @asn_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    autonomous_system_organization:last_not_null(autonomous_system_organization),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    is_anonymous_proxy:last_not_null(is_anonymous_proxy),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+@ipv4_asn_sq <- @{
+  filter int64(network_obj.family) = 4
+  make_col ipv4_int:int64(network_obj.ip_fields[0])
+  join
+    on(ipv4_int >= @asn_ipv4_v2_sq.network_start and ipv4_int <= @asn_ipv4_v2_sq.network_end),
+    aso:@asn_ipv4_v2_sq.autonomous_system_organization
+  statsby
+    aso:any_not_null(aso),
+    group_by(source_ip)
+}
+
+@ipv4_city_sq <- @{
+  filter int64(network_obj.family) = 4
+  make_col ipv4_int:int64(network_obj.ip_fields[0])
+  join
+    on(ipv4_int >= @city_ipv4_v2_sq.network_start and ipv4_int <= @city_ipv4_v2_sq.network_end),
+    country:@city_ipv4_v2_sq.country_name,
+    city:@city_ipv4_v2_sq.city_name,
+    anon:@city_ipv4_v2_sq.is_anonymous_proxy,
+    state:@city_ipv4_v2_sq.subdivision_1_name
+  statsby
+    country:any_not_null(country),
+    city:any_not_null(city),
+    anon:any_not_null(anon),
+    state:any_not_null(state),
+    group_by(source_ip)
+}
+
+@ip_all_sq <- @ipv4_asn_sq{
+  union @ipv4_city_sq
+
+  statsby
+    aso:any_not_null(aso),
+    country:any_not_null(country),
+    city:any_not_null(city),
+    anon:any_not_null(anon),
+    state:any_not_null(state),
+    group_by(source_ip)
+}
+
+leftjoin
+  on(source_ip=@ip_all_sq.source_ip),
+  Country:@ip_all_sq.country,
+  City:@ip_all_sq.city,
+  State:@ip_all_sq.state,
+  Aso:@ip_all_sq.aso
+
+make_table
+pick_col
+  RemoteIP:string(FIELDS.remip),
+  Country:string(Country),
+  City:string(City),
+  State:string(State),
+  ASN:string(Aso),
+  Action:string(FIELDS.action),
+  EventTime:parse_isotime(string(FIELDS.timestamp))
+
+filter not is_null(RemoteIP)
+
+aggregate group_by(RemoteIP, Country, City, State, ASN),
+  Events:count(),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime)
+
+sort desc(LastSeen)
+//limit 500
+
+sort desc(LastSeen)
+sort desc(FirstSeen)
+
+//filter Country = "Russia"
+sort desc(Events)
