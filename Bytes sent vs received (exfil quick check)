@@ -1,0 +1,85 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  SentBytes:int64(coalesce(FIELDS.sentbyte, 0)),
+  RcvdBytes:int64(coalesce(FIELDS.rcvdbyte, 0))
+
+// Filter for 2025-08-18 only (UTC)
+filter EventTime >= parse_isotime("2025-08-18T00:00:00Z")
+  and EventTime <  parse_isotime("2025-08-19T00:00:00Z")
+
+// --- Geo lookup table (collapsed IPv4 ranges) ---
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// --- Source IP → Geo ---
+@src_geo <- @{
+  make_col src_net:parse_ip(SourceIP)
+  filter int64(src_net.family) = 4
+  make_col ipv4_int:int64(src_net.ip_fields[0])
+  join
+    on(ipv4_int >= @city_ipv4_v2_sq.network_start and ipv4_int <= @city_ipv4_v2_sq.network_end),
+    src_country:@city_ipv4_v2_sq.country_name,
+    src_city:@city_ipv4_v2_sq.city_name,
+    src_state:@city_ipv4_v2_sq.subdivision_1_name
+  statsby
+    SrcCountry:any_not_null(src_country),
+    SrcCity:any_not_null(src_city),
+    SrcState:any_not_null(src_state),
+    group_by(SourceIP)
+}
+
+// --- Destination IP → Geo ---
+@dst_geo <- @{
+  make_col dst_net:parse_ip(DestinationIP)
+  filter int64(dst_net.family) = 4
+  make_col ipv4_int:int64(dst_net.ip_fields[0])
+  join
+    on(ipv4_int >= @city_ipv4_v2_sq.network_start and ipv4_int <= @city_ipv4_v2_sq.network_end),
+    dst_country:@city_ipv4_v2_sq.country_name,
+    dst_city:@city_ipv4_v2_sq.city_name,
+    dst_state:@city_ipv4_v2_sq.subdivision_1_name
+  statsby
+    DstCountry:any_not_null(dst_country),
+    DstCity:any_not_null(dst_city),
+    DstState:any_not_null(dst_state),
+    group_by(DestinationIP)
+}
+
+// Attach geo to rows
+leftjoin
+  on(SourceIP=@src_geo.SourceIP),
+  SrcCountry:@src_geo.SrcCountry,
+  SrcCity:@src_geo.SrcCity,
+  SrcState:@src_geo.SrcState
+
+leftjoin
+  on(DestinationIP=@dst_geo.DestinationIP),
+  DstCountry:@dst_geo.DstCountry,
+  DstCity:@dst_geo.DstCity,
+  DstState:@dst_geo.DstState
+
+// Final projection
+make_table
+pick_col
+  EventTime,
+  SourceIP,  SrcCity,  SrcState,  SrcCountry,
+  DestinationIP, DstCity, DstState, DstCountry,
+  SentBytes, RcvdBytes
+
+sort asc(EventTime)
+
+filter is_null(DstCountry) or (DstCountry != "United States")
