@@ -211,7 +211,7 @@ $logProcessingScript = {
 
 # Get all .log files in the folder
 Write-Host "Scanning for log files in: $LogFolderPath" -ForegroundColor Yellow
-$logFiles = Get-ChildItem -Path $LogFolderPath -Filter *.log -File
+$logFiles = Get-ChildItem -Path $LogFolderPath -Filter *.log -File -Recurse
 
 if ($logFiles.Count -eq 0) {
     Write-Warning "No .log files found in the folder '$LogFolderPath'."
