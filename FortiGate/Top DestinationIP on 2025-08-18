@@ -3,12 +3,18 @@ filter contains(string(path), "firewall")
 
 make_table
 pick_col
-  EventTime:parse_isotime(string(FIELDS.timestamp)),
-  DestinationIP:string(FIELDS.dstip)
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  Service:string(FIELDS.service),
+  Action:string(FIELDS.action),
+  DestinationPort:string(FIELDS.dstport),
+  SentBytes:int64(coalesce(FIELDS.sentbyte, 0)),
+  RcvdBytes:int64(coalesce(FIELDS.rcvdbyte, 0))
 
-filter EventTime >= parse_isotime("2025-08-18T00:00:00Z")
-  and EventTime <  parse_isotime("2025-08-19T00:00:00Z")
-  and not is_null(DestinationIP)
+// Filter for specific date (adjust as needed)
+filter Date = "2025-09-17" and not is_null(DestinationIP)
 
 // --- Geo lookup table ---
 @city_ipv4_v2_sq <- @city_ipv4{
@@ -22,35 +28,88 @@ filter EventTime >= parse_isotime("2025-08-18T00:00:00Z")
   add_key network_start, network_end
 }
 
-// --- DestinationIP → Geo ---
+// --- ASN lookup table ---
+@asn_ipv4_v2_sq <- @asn_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    autonomous_system_organization:last_not_null(autonomous_system_organization),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// --- DestinationIP → Geo + ASN ---
 @dst_geo <- @{
   make_col dst_net:parse_ip(DestinationIP)
   filter int64(dst_net.family) = 4
   make_col ipv4_int:int64(dst_net.ip_fields[0])
+  
+  // Geo lookup
   join
     on(ipv4_int >= @city_ipv4_v2_sq.network_start 
     and ipv4_int <= @city_ipv4_v2_sq.network_end),
-    DstCountry:@city_ipv4_v2_sq.country_name,
-    DstCity:@city_ipv4_v2_sq.city_name,
-    DstState:@city_ipv4_v2_sq.subdivision_1_name
+    country:@city_ipv4_v2_sq.country_name,
+    city:@city_ipv4_v2_sq.city_name,
+    state:@city_ipv4_v2_sq.subdivision_1_name
+  
+  // ASN lookup
+  join
+    on(ipv4_int >= @asn_ipv4_v2_sq.network_start 
+    and ipv4_int <= @asn_ipv4_v2_sq.network_end),
+    asn:@asn_ipv4_v2_sq.autonomous_system_organization
+  
   statsby
-    DstCountry:any_not_null(DstCountry),
-    DstCity:any_not_null(DstCity),
-    DstState:any_not_null(DstState),
+    DstCountry:any_not_null(country),
+    DstCity:any_not_null(city),
+    DstState:any_not_null(state),
+    DstASN:any_not_null(asn),
     group_by(DestinationIP)
 }
 
-// --- Join + Aggregate ---
+// --- Join + Enhanced Aggregate ---
 leftjoin
   on(DestinationIP=@dst_geo.DestinationIP),
   DstCountry:@dst_geo.DstCountry,
   DstCity:@dst_geo.DstCity,
-  DstState:@dst_geo.DstState
+  DstState:@dst_geo.DstState,
+  DstASN:@dst_geo.DstASN
 
-aggregate group_by(DestinationIP, DstCity, DstState, DstCountry),
-  Events:count()
+aggregate group_by(DestinationIP, DstCity, DstState, DstCountry, DstASN),
+  Events:count(),
+  UniqueSourceIPs:count_distinct(SourceIP),
+  UniqueServices:count_distinct(Service),
+  UniquePorts:count_distinct(DestinationPort),
+  TotalSentBytes:sum(SentBytes),
+  TotalRcvdBytes:sum(RcvdBytes),
+  AllowEvents:sum(if(Action = "accept", 1, 0)),
+  DenyEvents:sum(if(Action = "deny" or Action = "close", 1, 0)),
+  FirstTime:min(Time),
+  LastTime:max(Time)
+
+// Calculate destination characteristics
+make_col DestinationType:case(
+  UniqueSourceIPs > 50, "HIGH_TRAFFIC_TARGET",
+  UniqueServices > 10, "MULTI_SERVICE_TARGET",
+  UniquePorts > 20, "PORT_DIVERSE_TARGET",
+  DenyEvents > AllowEvents, "HEAVILY_BLOCKED",
+  TotalRcvdBytes > TotalSentBytes * 2, "DATA_SOURCE",
+  true, "NORMAL_TARGET"
+)
+
+make_col TrafficPattern:case(
+  UniqueSourceIPs > 20 and UniqueServices = 1, "SINGLE_SERVICE_POPULAR",
+  Events > 1000 and UniqueSourceIPs < 5, "HIGH_VOLUME_FEW_SOURCES",
+  DenyEvents > 0.8 * Events, "MOSTLY_BLOCKED_TARGET",
+  true, "MIXED_TRAFFIC"
+)
+
+// Filter first, then sort (more efficient)
+filter is_null(DstCountry) or DstCountry != "United States"
 
 sort desc(Events)
 limit 200
 
-filter DstCountry != "United States"
+// Uncomment for specific analysis:
+// filter DestinationType != "NORMAL_TARGET"
+// filter UniqueSourceIPs > 20
+// filter DstCountry = "China"

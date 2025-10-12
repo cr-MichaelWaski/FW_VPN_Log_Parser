@@ -1,0 +1,63 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
+  Action:string(FIELDS.action),
+  Service:string(FIELDS.service),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  Protocol:string(FIELDS.proto),
+  DestinationPort:string(FIELDS.dstport)
+
+// Focus on recent data - adjust date as needed
+filter Date = "2025-09-17"
+
+// First pass: Get overall service/action frequency
+@baseline <- @{
+  aggregate group_by(Action, Service),
+    TotalEvents:count(),
+    UniqueSourceIPs:count_distinct(SourceIP),
+    UniqueDestPorts:count_distinct(DestinationPort)
+}
+
+// Second pass: Hourly breakdown to spot time-based anomalies
+make_col HourPart:split(Time, ":")[0]
+make_col Hour:Date + " " + HourPart + ":00:00"
+
+aggregate group_by(Hour, Action, Service),
+  HourlyEvents:count(),
+  UniqueSourceIPs:count_distinct(SourceIP),
+  UniqueDestIPs:count_distinct(DestinationIP),
+  UniqueDestPorts:count_distinct(DestinationPort),
+  FirstTime:min(Time),
+  LastTime:max(Time)
+
+// Join with baseline for comparison
+leftjoin 
+  on(Action=@baseline.Action and Service=@baseline.Service),
+  BaselineEvents:@baseline.TotalEvents,
+  BaselineSourceIPs:@baseline.UniqueSourceIPs
+
+// Calculate anomaly metrics
+make_col AvgEventsPerHour:BaselineEvents / 24
+make_col EventAnomalyRatio:HourlyEvents / AvgEventsPerHour
+make_col SourceIPAnomalyRatio:UniqueSourceIPs / BaselineSourceIPs
+
+// Flag potential anomalies
+make_col IsEventAnomaly:(EventAnomalyRatio > 3 or EventAnomalyRatio < 0.1)
+make_col IsSourceAnomaly:(SourceIPAnomalyRatio > 2)
+make_col AnomalyType:case(
+  IsEventAnomaly and EventAnomalyRatio > 3, "HIGH_VOLUME",
+  IsEventAnomaly and EventAnomalyRatio < 0.1, "LOW_VOLUME", 
+  IsSourceAnomaly, "UNUSUAL_SOURCES",
+  true, "NORMAL"
+)
+
+// Show anomalies first, then normal traffic
+sort desc(EventAnomalyRatio), desc(SourceIPAnomalyRatio)
+
+// Uncomment to filter for anomalies only:
+// filter AnomalyType != "NORMAL"

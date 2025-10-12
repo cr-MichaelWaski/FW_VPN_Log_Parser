@@ -1,0 +1,89 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  Country:string(FIELDS.srccountry),
+  Action:string(FIELDS.action),
+  Service:string(FIELDS.service),
+  Protocol:string(FIELDS.proto),
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
+  SentBytes:int64(FIELDS.sentbyte),
+  ReceivedBytes:int64(FIELDS.rcvdbyte)
+
+filter not is_null(SourceIP) and SourceIP != ""
+
+// ───────── Geo + ASN Lookup Tables ─────────
+
+// MaxMind Geo DB
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// ASN DB
+@asn_ipv4_v2_sq <- @asn_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    autonomous_system_organization:last_not_null(autonomous_system_organization),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// Map SourceIP → Geo + ASN
+@source_geo <- @{
+  filter not is_null(SourceIP)
+  make_col ip:parse_ip(SourceIP)
+  filter int64(ip.family) = 4
+  make_col ipv4:int64(ip.ip_fields[0])
+
+  join
+    on(ipv4 >= @city_ipv4_v2_sq.network_start and ipv4 <= @city_ipv4_v2_sq.network_end),
+    GeoCountry:@city_ipv4_v2_sq.country_name,
+    City:@city_ipv4_v2_sq.city_name,
+    State:@city_ipv4_v2_sq.subdivision_1_name
+
+  join
+    on(ipv4 >= @asn_ipv4_v2_sq.network_start and ipv4 <= @asn_ipv4_v2_sq.network_end),
+    ASN:@asn_ipv4_v2_sq.autonomous_system_organization
+
+  statsby
+    GeoCountry:any_not_null(GeoCountry),
+    City:any_not_null(City),
+    State:any_not_null(State),
+    ASN:any_not_null(ASN),
+    group_by(SourceIP)
+}
+
+// ───────── Attach Geo Data ─────────
+leftjoin
+  on(SourceIP=@source_geo.SourceIP),
+  GeoCountry:@source_geo.GeoCountry,
+  City:@source_geo.City,
+  State:@source_geo.State,
+  ASN:@source_geo.ASN
+
+aggregate group_by(SourceIP, Country, GeoCountry, City, State, ASN),
+  Events:count(),
+  UniqueDestinationIPs:count_distinct(DestinationIP),
+  UniqueServices:count_distinct(Service),
+  UniqueActions:count_distinct(Action),
+  TotalSentBytes:sum(SentBytes),
+  TotalReceivedBytes:sum(ReceivedBytes),
+  FirstDate:min(Date),
+  LastDate:max(Date),
+  EarliestTime:min(Time),
+  LatestTime:max(Time)
+
+sort desc(Events)
+limit 100

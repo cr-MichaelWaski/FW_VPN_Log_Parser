@@ -3,14 +3,67 @@ filter contains(string(path), "firewall")
 
 make_table
 pick_col
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
   PolicyID:string(FIELDS.policyid),
   PolicyName:string(FIELDS.policyname),
-  Action:string(FIELDS.action)
+  Action:string(FIELDS.action),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  Service:string(FIELDS.service),
+  DestinationPort:string(FIELDS.dstport),
+  SourceCountry:string(FIELDS.srccountry),
+  Protocol:string(FIELDS.proto)
 
-filter Action = "deny" or Action = "client-rst" or Action = "blocked"
+// Filter for denial/blocking actions
+filter Action = "deny" or Action = "client-rst" or Action = "blocked" or Action = "close"
 
-aggregate group_by(PolicyID, PolicyName),
-  Events:count()
+// Enhanced policy analysis with threat intelligence
+aggregate group_by(PolicyID, PolicyName, Action),
+  Events:count(),
+  UniqueSourceIPs:count_distinct(SourceIP),
+  UniqueDestIPs:count_distinct(DestinationIP),
+  UniqueServices:count_distinct(Service),
+  UniquePorts:count_distinct(DestinationPort),
+  UniqueCountries:count_distinct(SourceCountry),
+  TopSourceCountry:max(SourceCountry),
+  TopService:max(Service),
+  TopDestPort:max(DestinationPort),
+  FirstSeen:min(Date + " " + Time),
+  LastSeen:max(Date + " " + Time)
 
-limit 50
+// Calculate policy characteristics
+make_col PolicyType:case(
+  UniqueSourceIPs > 100 and UniqueCountries > 10, "GLOBAL_THREAT_BLOCKER",
+  UniqueServices > 20, "MULTI_SERVICE_BLOCKER", 
+  UniqueDestIPs > 50, "MULTI_TARGET_PROTECTOR",
+  UniqueSourceIPs > 50, "HIGH_VOLUME_BLOCKER",
+  Events > 1000, "FREQUENT_TRIGGER",
+  true, "STANDARD_POLICY"
+)
+
+make_col ThreatPattern:case(
+  UniqueCountries > 15, "INTERNATIONAL_THREATS",
+  UniqueServices = 1 and Events > 500, "SERVICE_SPECIFIC_ATTACKS",
+  UniqueSourceIPs > 20 and UniqueDestIPs = 1, "FOCUSED_TARGET_PROTECTION",
+  Events > 2000 and UniqueSourceIPs < 10, "REPEAT_OFFENDER_BLOCKING",
+  true, "MIXED_BLOCKING"
+)
+
+// Calculate policy effectiveness metrics
+make_col EventsPerHour:Events / 24.0
+make_col ThreatDiversity:UniqueSourceIPs + UniqueServices + UniqueCountries
+
 sort desc(Events)
+limit 100
+
+// Add summary insights
+// Policies blocking the most events
+// Geographic distribution of blocked threats  
+// Service-specific blocking patterns
+// Policy efficiency analysis
+
+// Uncomment for specific analysis:
+// filter PolicyType != "STANDARD_POLICY"
+// filter UniqueCountries > 10
+// filter Events > 1000

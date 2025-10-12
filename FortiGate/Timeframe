@@ -1,21 +1,16 @@
-@ual <- @BEC {
-make_col path:lower(string(EXTRA.path)) // turn into lowercase to avoid typos
-filter contains(string(path), "firewall") 
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
 
 make_table
 pick_col
     LogSource:string("Firewall Log"), 
-    EventTime:parse_isotime(
-            if (contains(lower(string(EXTRA.path)), "firewall") and not is_null(FIELDS.timestamp),
-                FIELDS.timestamp,
-                "")
-       )
+    Date:string(FIELDS.date),
+    Time:string(FIELDS.time)
 
 aggregate group_by(LogSource),
-    StartDate:format_time(min(EventTime), 'YYYY-MM-DD HH24:MI:SS'),
-    EndDate:format_time(max(EventTime), 'YYYY-MM-DD HH24:MI:SS'),
+    StartDate:min(Date),
+    EndDate:max(Date),
+    EarliestTime:min(Time),
+    LatestTime:max(Time),
+    UniqueDates:count_distinct(Date),
     LogCount:count()
-}
-
-<- @ual {
-}

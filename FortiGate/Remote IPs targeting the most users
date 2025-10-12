@@ -3,25 +3,19 @@ filter contains(string(path), "firewall")
 
 make_table
 pick_col
-  observe_timestamp:parse_isotime(string(FIELDS.BUNDLE_TIMESTAMP)),
-  FIELDS:FIELDS,
-  source_ip:string(FIELDS.remip)
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
+  RemoteIP:string(FIELDS.remip),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  Service:string(FIELDS.service),
+  Action:string(FIELDS.action),
+  DestinationPort:string(FIELDS.dstport)
 
-filter not is_null(source_ip)
+// Use SourceIP as proxy for "users" since user field may not exist
+filter not is_null(RemoteIP) and RemoteIP != "" and not is_null(SourceIP)
 
-make_col network_obj:parse_ip(source_ip)
-
-/* enrichment blocks unchanged … */
-
-@asn_ipv4_v2_sq <- @asn_ipv4{
-  statsby
-    network_start:any_not_null(network_start),
-    network_end:any_not_null(network_end),
-    autonomous_system_organization:last_not_null(autonomous_system_organization),
-    group_by(network)
-  add_key network_start, network_end
-}
-
+// --- Geo lookup table (collapsed for performance) ---
 @city_ipv4_v2_sq <- @city_ipv4{
   statsby
     network_start:any_not_null(network_start),
@@ -34,68 +28,93 @@ make_col network_obj:parse_ip(source_ip)
   add_key network_start, network_end
 }
 
-@ipv4_asn_sq <- @{
-  filter int64(network_obj.family) = 4
-  make_col ipv4_int:int64(network_obj.ip_fields[0])
-  join
-    on(ipv4_int >= @asn_ipv4_v2_sq.network_start and ipv4_int <= @asn_ipv4_v2_sq.network_end),
-    aso:@asn_ipv4_v2_sq.autonomous_system_organization
+// --- ASN lookup table ---
+@asn_ipv4_v2_sq <- @asn_ipv4{
   statsby
-    aso:any_not_null(aso),
-    group_by(source_ip)
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    autonomous_system_organization:last_not_null(autonomous_system_organization),
+    group_by(network)
+  add_key network_start, network_end
 }
 
-@ipv4_city_sq <- @{
-  filter int64(network_obj.family) = 4
-  make_col ipv4_int:int64(network_obj.ip_fields[0])
+// --- RemoteIP → Geo + ASN ---
+@remote_geo <- @{
+  make_col ip_obj:parse_ip(RemoteIP)
+  filter int64(ip_obj.family) = 4
+  make_col ipv4_int:int64(ip_obj.ip_fields[0])
+  
+  // Geo lookup
   join
     on(ipv4_int >= @city_ipv4_v2_sq.network_start and ipv4_int <= @city_ipv4_v2_sq.network_end),
     country:@city_ipv4_v2_sq.country_name,
     city:@city_ipv4_v2_sq.city_name,
-    anon:@city_ipv4_v2_sq.is_anonymous_proxy,
-    state:@city_ipv4_v2_sq.subdivision_1_name
+    state:@city_ipv4_v2_sq.subdivision_1_name,
+    is_proxy:@city_ipv4_v2_sq.is_anonymous_proxy
+  
+  // ASN lookup
+  join
+    on(ipv4_int >= @asn_ipv4_v2_sq.network_start and ipv4_int <= @asn_ipv4_v2_sq.network_end),
+    asn:@asn_ipv4_v2_sq.autonomous_system_organization
+  
   statsby
-    country:any_not_null(country),
-    city:any_not_null(city),
-    anon:any_not_null(anon),
-    state:any_not_null(state),
-    group_by(source_ip)
+    Country:any_not_null(country),
+    City:any_not_null(city),
+    State:any_not_null(state),
+    ASN:any_not_null(asn),
+    IsProxy:any_not_null(is_proxy),
+    group_by(RemoteIP)
 }
 
-@ip_all_sq <- @ipv4_asn_sq{
-  union @ipv4_city_sq
-  statsby
-    aso:any_not_null(aso),
-    country:any_not_null(country),
-    city:any_not_null(city),
-    anon:any_not_null(anon),
-    state:any_not_null(state),
-    group_by(source_ip)
-}
-
+// Attach geo data
 leftjoin
-  on(source_ip=@ip_all_sq.source_ip),
-  Country:@ip_all_sq.country,
-  City:@ip_all_sq.city,
-  State:@ip_all_sq.state,
-  Aso:@ip_all_sq.aso
+  on(RemoteIP=@remote_geo.RemoteIP),
+  Country:@remote_geo.Country,
+  City:@remote_geo.City,
+  State:@remote_geo.State,
+  ASN:@remote_geo.ASN,
+  IsProxy:@remote_geo.IsProxy
 
-make_table
-pick_col
-  RemoteIP:string(FIELDS.remip),
-  User:string(FIELDS.user),
-  Country:string(Country),
-  City:string(City),
-  State:string(State),
-  ASN:string(Aso)
+// Aggregate targeting data with enhanced metrics
+aggregate group_by(RemoteIP, Country, City, State, ASN, IsProxy),
+  TargetedSourceIPs:count_distinct(SourceIP),
+  UniqueDestinations:count_distinct(DestinationIP),
+  UniqueServices:count_distinct(Service),
+  UniquePorts:count_distinct(DestinationPort),
+  Events:count(),
+  AllowEvents:sum(if(Action = "accept", 1, 0)),
+  DenyEvents:sum(if(Action = "deny" or Action = "close", 1, 0)),
+  FirstSeen:min(Date + " " + Time),
+  LastSeen:max(Date + " " + Time)
 
-filter not is_null(RemoteIP) and not is_null(User)
+// Calculate threat indicators
+make_col ThreatScore:case(
+  TargetedSourceIPs > 20 and UniqueServices > 5, "HIGH_MULTI_TARGET",
+  TargetedSourceIPs > 10 and UniqueDestinations > 5, "MODERATE_MULTI_TARGET",
+  TargetedSourceIPs > 5, "POTENTIAL_MULTI_TARGET",
+  IsProxy = true and TargetedSourceIPs > 3, "PROXY_MULTI_TARGET",
+  true, "SINGLE_TARGET"
+)
 
-aggregate group_by(RemoteIP, Country, City, State, ASN),
-  Users:count_distinct(User),
-  Events:count()
+make_col AttackPattern:case(
+  DenyEvents > AllowEvents and TargetedSourceIPs > 10, "WIDESPREAD_BLOCKED",
+  UniqueServices = 1 and TargetedSourceIPs > 10, "SERVICE_FOCUSED",
+  UniquePorts > 10 and TargetedSourceIPs > 5, "PORT_SCANNING",
+  true, "MIXED_ACTIVITY"
+)
 
-sort desc(Users), desc(Events)
+// Filter out known legitimate services
+filter is_null(ASN) or (
+  ASN != "Global Connectivity Solutions Llp" and
+  ASN != "MICROSOFT-CORP-MSN-AS-BLOCK" and
+  ASN != "AMAZON-02" and
+  ASN != "GOOGLE-CLOUD-PLATFORM"
+)
 
-//filter RemoteIP = "47.236.36.43"
-filter is_null(ASN) or (ASN != "Global Connectivity Solutions Llp")
+sort desc(TargetedSourceIPs), desc(Events)
+limit 100
+
+// Uncomment for specific analysis:
+// filter ThreatScore != "SINGLE_TARGET"
+// filter IsProxy = true
+// filter TargetedSourceIPs > 10

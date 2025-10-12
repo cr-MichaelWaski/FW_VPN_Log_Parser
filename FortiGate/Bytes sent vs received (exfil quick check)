@@ -3,15 +3,17 @@ filter contains(string(path), "firewall")
 
 make_table
 pick_col
-  EventTime:parse_isotime(string(FIELDS.timestamp)),
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
   SourceIP:string(FIELDS.srcip),
   DestinationIP:string(FIELDS.dstip),
   SentBytes:int64(coalesce(FIELDS.sentbyte, 0)),
-  RcvdBytes:int64(coalesce(FIELDS.rcvdbyte, 0))
+  RcvdBytes:int64(coalesce(FIELDS.rcvdbyte, 0)),
+  Service:string(FIELDS.service),
+  Action:string(FIELDS.action)
 
-// Filter for 2025-08-18 only (UTC)
-filter EventTime >= parse_isotime("2025-08-18T00:00:00Z")
-  and EventTime <  parse_isotime("2025-08-19T00:00:00Z")
+// Filter for specific date (update as needed)
+//filter Date = "2025-09-17"
 
 // --- Geo lookup table (collapsed IPv4 ranges) ---
 @city_ipv4_v2_sq <- @city_ipv4{
@@ -72,14 +74,19 @@ leftjoin
   DstCity:@dst_geo.DstCity,
   DstState:@dst_geo.DstState
 
-// Final projection
-make_table
-pick_col
-  EventTime,
-  SourceIP,  SrcCity,  SrcState,  SrcCountry,
-  DestinationIP, DstCity, DstState, DstCountry,
-  SentBytes, RcvdBytes
+// Calculate exfiltration metrics
+aggregate group_by(SourceIP, DestinationIP, SrcCountry, DstCountry, Service),
+  TotalSent:sum(SentBytes),
+  TotalReceived:sum(RcvdBytes),
+  NetTransfer:(sum(SentBytes) - sum(RcvdBytes)),
+  ExfilRatio:if(sum(RcvdBytes) > 0, sum(SentBytes) / sum(RcvdBytes), 999),
+  Sessions:count(),
+  FirstTime:min(Time),
+  LastTime:max(Time)
 
-sort asc(EventTime)
+// Focus on potential exfiltration patterns
+filter TotalSent > 1000000  // > 1MB sent
+  and ExfilRatio > 5        // Sent 5x more than received
+  and (is_null(DstCountry) or DstCountry != "United States")
 
-filter is_null(DstCountry) or (DstCountry != "United States")
+sort desc(TotalSent)

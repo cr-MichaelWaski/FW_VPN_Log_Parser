@@ -1,0 +1,126 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  Service:string(FIELDS.service),
+  Action:string(FIELDS.action),
+  DestinationPort:string(FIELDS.dstport),
+  Protocol:string(FIELDS.proto),
+  SentBytes:int64(coalesce(FIELDS.sentbyte, 0)),
+  RcvdBytes:int64(coalesce(FIELDS.rcvdbyte, 0))
+
+// Extract hour for flexible time filtering
+make_col HourPart:split(Time, ":")[0]
+make_col Hour:Date + " " + HourPart + ":00:00"
+
+// Filter for specific date and hour (adjust as needed)
+filter Date = "2025-09-17" and HourPart = "15"  // 3 PM hour
+
+// --- Geo lookup table ---
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// --- Source and Destination Geo lookups ---
+@src_geo <- @{
+  make_col src_net:parse_ip(SourceIP)
+  filter int64(src_net.family) = 4
+  make_col ipv4_int:int64(src_net.ip_fields[0])
+  join
+    on(ipv4_int >= @city_ipv4_v2_sq.network_start 
+    and ipv4_int <= @city_ipv4_v2_sq.network_end),
+    src_country:@city_ipv4_v2_sq.country_name
+  statsby
+    SrcCountry:any_not_null(src_country),
+    group_by(SourceIP)
+}
+
+@dst_geo <- @{
+  make_col dst_net:parse_ip(DestinationIP)
+  filter int64(dst_net.family) = 4
+  make_col ipv4_int:int64(dst_net.ip_fields[0])
+  join
+    on(ipv4_int >= @city_ipv4_v2_sq.network_start 
+    and ipv4_int <= @city_ipv4_v2_sq.network_end),
+    dst_country:@city_ipv4_v2_sq.country_name
+  statsby
+    DstCountry:any_not_null(dst_country),
+    group_by(DestinationIP)
+}
+
+// Attach geo data
+leftjoin on(SourceIP=@src_geo.SourceIP), SrcCountry:@src_geo.SrcCountry
+leftjoin on(DestinationIP=@dst_geo.DestinationIP), DstCountry:@dst_geo.DstCountry
+
+// Enhanced aggregation with comprehensive flow analysis
+aggregate group_by(SourceIP, DestinationIP, Service, Action, SrcCountry, DstCountry),
+  Events:count(),
+  TotalSentBytes:sum(SentBytes),
+  TotalRcvdBytes:sum(RcvdBytes),
+  TotalBytes:(sum(SentBytes) + sum(RcvdBytes)),
+  UniquePorts:count_distinct(DestinationPort),
+  FirstTime:min(Time),
+  LastTime:max(Time),
+  Duration:max(Time) // Time span of communication
+
+// Calculate flow characteristics
+make_col FlowType:case(
+  TotalBytes > 1000000000, "HIGH_VOLUME_FLOW",  // >1GB
+  Events > 1000, "HIGH_FREQUENCY_FLOW",
+  TotalSentBytes > TotalRcvdBytes * 3, "UPLOAD_HEAVY",
+  TotalRcvdBytes > TotalSentBytes * 3, "DOWNLOAD_HEAVY",
+  Action = "deny", "BLOCKED_FLOW",
+  true, "NORMAL_FLOW"
+)
+
+make_col CommunicationPattern:case(
+  SrcCountry != DstCountry, "INTERNATIONAL_FLOW",
+  UniquePorts > 5, "MULTI_PORT_COMMUNICATION",
+  Events > 500 and TotalBytes < 100000, "CHATTY_LOW_DATA",
+  TotalBytes > 100000000 and Events < 100, "BULK_DATA_TRANSFER",
+  true, "STANDARD_COMMUNICATION"
+)
+
+// Security risk assessment
+make_col RiskIndicator:case(
+  Action = "deny" and Events > 100, "PERSISTENT_BLOCKED",
+  FlowType = "UPLOAD_HEAVY" and CommunicationPattern = "INTERNATIONAL_FLOW", "POTENTIAL_EXFILTRATION",
+  Events > 2000 and Service = "HTTPS", "HIGH_ENCRYPTED_ACTIVITY",
+  UniquePorts > 10, "PORT_DIVERSE_COMMUNICATION",
+  true, "NORMAL_RISK"
+)
+
+// Calculate efficiency metrics
+make_col BytesPerEvent:TotalBytes / Events
+make_col SuccessRate:case(
+  Action = "accept", 100.0,
+  Action = "deny", 0.0,
+  true, 50.0
+)
+
+sort desc(TotalBytes), desc(Events)
+limit 200
+
+// Summary insights for the hour
+// Top communicating pairs by volume and frequency
+// International vs domestic traffic patterns
+// Blocked vs allowed communication flows
+// High-risk communication patterns
+
+// Uncomment for specific analysis:
+// filter FlowType != "NORMAL_FLOW"
+// filter RiskIndicator != "NORMAL_RISK"
+// filter CommunicationPattern = "INTERNATIONAL_FLOW"
+// filter TotalBytes > 100000000  // >100MB flows

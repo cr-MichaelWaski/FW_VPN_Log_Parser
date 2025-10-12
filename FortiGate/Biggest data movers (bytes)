@@ -131,4 +131,3 @@ aggregate group_by(
 
 //filter is_null(DstCountry) or (DstCountry != "United States")
 sort desc(TotalBytes)
-filter DstASN = "M247 Europe SRL"

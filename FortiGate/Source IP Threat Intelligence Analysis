@@ -1,0 +1,126 @@
+make_col path:lower(string(EXTRA.path))
+filter contains(string(path), "firewall")
+
+make_table
+pick_col
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  Service:string(FIELDS.service),
+  Action:string(FIELDS.action),
+  DestinationPort:string(FIELDS.dstport),
+  Protocol:string(FIELDS.proto),
+  SentBytes:int64(coalesce(FIELDS.sentbyte, 0)),
+  RcvdBytes:int64(coalesce(FIELDS.rcvdbyte, 0))
+
+// Filter for specific date (adjust as needed)
+filter Date = "2025-09-17" and not is_null(SourceIP)
+
+// --- Geo lookup table ---
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    is_anonymous_proxy:last_not_null(is_anonymous_proxy),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// --- ASN lookup table ---
+@asn_ipv4_v2_sq <- @asn_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    autonomous_system_organization:last_not_null(autonomous_system_organization),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// --- SourceIP → Geo + ASN ---
+@src_geo <- @{
+  make_col src_net:parse_ip(SourceIP)
+  filter int64(src_net.family) = 4
+  make_col ipv4_int:int64(src_net.ip_fields[0])
+  
+  // Geo lookup
+  join
+    on(ipv4_int >= @city_ipv4_v2_sq.network_start 
+    and ipv4_int <= @city_ipv4_v2_sq.network_end),
+    country:@city_ipv4_v2_sq.country_name,
+    city:@city_ipv4_v2_sq.city_name,
+    state:@city_ipv4_v2_sq.subdivision_1_name,
+    is_proxy:@city_ipv4_v2_sq.is_anonymous_proxy
+  
+  // ASN lookup
+  join
+    on(ipv4_int >= @asn_ipv4_v2_sq.network_start 
+    and ipv4_int <= @asn_ipv4_v2_sq.network_end),
+    asn:@asn_ipv4_v2_sq.autonomous_system_organization
+  
+  statsby
+    SrcCountry:any_not_null(country),
+    SrcCity:any_not_null(city),
+    SrcState:any_not_null(state),
+    SrcASN:any_not_null(asn),
+    IsProxy:any_not_null(is_proxy),
+    group_by(SourceIP)
+}
+
+// --- Join + Enhanced Aggregate ---
+leftjoin
+  on(SourceIP=@src_geo.SourceIP),
+  SrcCountry:@src_geo.SrcCountry,
+  SrcCity:@src_geo.SrcCity,
+  SrcState:@src_geo.SrcState,
+  SrcASN:@src_geo.SrcASN,
+  IsProxy:@src_geo.IsProxy
+
+aggregate group_by(SourceIP, SrcCity, SrcState, SrcCountry, SrcASN, IsProxy),
+  Events:count(),
+  UniqueDestIPs:count_distinct(DestinationIP),
+  UniqueServices:count_distinct(Service),
+  UniquePorts:count_distinct(DestinationPort),
+  TotalSentBytes:sum(SentBytes),
+  TotalRcvdBytes:sum(RcvdBytes),
+  AllowEvents:sum(if(Action = "accept", 1, 0)),
+  DenyEvents:sum(if(Action = "deny" or Action = "close", 1, 0)),
+  FirstTime:min(Time),
+  LastTime:max(Time)
+
+// Calculate source IP threat characteristics
+make_col ThreatScore:case(
+  UniqueDestIPs > 50 and UniqueServices > 10, "HIGH_SCANNING",
+  DenyEvents > AllowEvents and Events > 100, "BLOCKED_ATTACKER",
+  UniqueDestIPs > 20 and DenyEvents > 50, "MODERATE_SCANNING",
+  IsProxy = true and UniqueDestIPs > 10, "PROXY_SCANNING",
+  UniqueDestIPs > 10, "POTENTIAL_RECON",
+  true, "NORMAL_ACTIVITY"
+)
+
+make_col ActivityPattern:case(
+  UniqueServices = 1 and UniqueDestIPs > 20, "SERVICE_SPECIFIC_SCANNING",
+  Events > 2000 and UniqueDestIPs < 5, "HIGH_VOLUME_FOCUSED",
+  TotalSentBytes > TotalRcvdBytes * 5, "DATA_EXFILTRATION_PATTERN",
+  DenyEvents > 0.8 * Events, "MOSTLY_BLOCKED_SOURCE",
+  true, "MIXED_ACTIVITY"
+)
+
+make_col RiskLevel:case(
+  ThreatScore = "HIGH_SCANNING" or ThreatScore = "BLOCKED_ATTACKER", "HIGH",
+  ThreatScore = "MODERATE_SCANNING" or ThreatScore = "PROXY_SCANNING", "MEDIUM",
+  ThreatScore = "POTENTIAL_RECON", "LOW",
+  true, "NORMAL"
+)
+
+sort desc(Events)
+limit 200
+
+// Uncomment for specific threat hunting:
+// filter RiskLevel != "NORMAL"
+// filter IsProxy = true  
+// filter SrcCountry = "China"
+// filter ThreatScore = "HIGH_SCANNING"

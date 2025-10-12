@@ -82,10 +82,32 @@ leftjoin
   DstCity:@dst_geo.DstCity,
   DstState:@dst_geo.DstState
 
-/* Aggregate with geo columns included */
-aggregate group_by(RemoteIP, Service, DestinationIP, RemCountry, RemCity, RemState, DstCountry, DstCity, DstState),
-  Events:count()
+/* Aggregate with enhanced threat intelligence */
+aggregate group_by(RemoteIP, RemCountry, RemCity, RemState),
+  Events:count(),
+  UniqueDestinations:count_distinct(DestinationIP),
+  UniqueServices:count_distinct(Service),
+  DestinationCountries:count_distinct(DstCountry)
 
-sort desc(Events)
+// Calculate threat indicators
+make_col ThreatScore:case(
+  UniqueDestinations > 50 and UniqueServices > 10, "HIGH_SCANNING",
+  UniqueDestinations > 20 and UniqueServices > 5, "MODERATE_SCANNING", 
+  UniqueDestinations > 10, "POTENTIAL_SCANNING",
+  UniqueServices > 5, "SERVICE_PROBING",
+  true, "NORMAL"
+)
 
-//filter Country = "Brazil"
+make_col ActivityPattern:case(
+  DestinationCountries > 3, "GLOBAL_TARGETING",
+  UniqueDestinations = 1 and Events > 100, "FOCUSED_ATTACK",
+  UniqueServices = 1 and UniqueDestinations > 10, "SERVICE_SCANNING",
+  true, "MIXED_ACTIVITY"
+)
+
+sort desc(Events), desc(UniqueDestinations)
+
+// Uncomment filters for specific analysis:
+// filter ThreatScore = "HIGH_SCANNING"
+// filter RemCountry = "Brazil"
+// filter UniqueDestinations > 10

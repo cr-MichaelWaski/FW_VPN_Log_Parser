@@ -3,9 +3,51 @@ filter contains(string(path), "firewall")
 
 make_table
 pick_col
-  Action:string(FIELDS.action)
+  Date:string(FIELDS.date),
+  Time:string(FIELDS.time),
+  Action:string(FIELDS.action),
+  Service:string(FIELDS.service),
+  SourceIP:string(FIELDS.srcip),
+  DestinationIP:string(FIELDS.dstip),
+  DestinationPort:string(FIELDS.dstport),
+  PolicyID:string(FIELDS.policyid),
+  PolicyName:string(FIELDS.policyname)
 
-aggregate group_by(Action),
-  Events:count()
+// Create normalized action categories
+make_col ActionCategory:case(
+  Action = "accept", "ALLOW",
+  Action = "deny", "DENY", 
+  Action = "close", "CLOSE",
+  contains(lower(Action), "block"), "BLOCK",
+  true, upper(Action)
+)
+
+// Overall action summary
+aggregate group_by(ActionCategory),
+  Events:count(),
+  UniqueSourceIPs:count_distinct(SourceIP),
+  UniqueDestIPs:count_distinct(DestinationIP),
+  UniqueServices:count_distinct(Service),
+  UniquePorts:count_distinct(DestinationPort),
+  UniquePolicies:count_distinct(PolicyID),
+  FirstSeen:min(Date + " " + Time),
+  LastSeen:max(Date + " " + Time)
+
+// Calculate percentages and ratios
+make_col TotalEvents:window(sum(Events))
+make_col EventPercentage:round(Events * 100.0 / TotalEvents, 2)
+
+// Security posture indicators
+make_col SecurityPosture:case(
+  ActionCategory = "ALLOW" and EventPercentage > 90, "PERMISSIVE",
+  ActionCategory = "DENY" and EventPercentage > 30, "RESTRICTIVE", 
+  ActionCategory = "ALLOW" and EventPercentage >= 70 and EventPercentage <= 90, "BALANCED",
+  true, "ANALYZE"
+)
 
 sort desc(Events)
+
+// Add summary statistics as comments
+// Total events across all actions
+// Ratio of allow:deny for security posture assessment
+// Unique resource counts for threat surface analysis

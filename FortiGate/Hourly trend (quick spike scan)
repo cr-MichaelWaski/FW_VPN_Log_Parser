@@ -3,9 +3,34 @@ filter contains(string(path), "firewall")
 
 make_table
 pick_col
-  EventTime:parse_isotime(string(FIELDS.timestamp))
+Date:string(FIELDS.date),
+Time:string(FIELDS.time),
+Action:string(FIELDS.action),
+Service:string(FIELDS.service),
+SentBytes:int64(coalesce(FIELDS.sentbyte, 0)),
+RcvdBytes:int64(coalesce(FIELDS.rcvdbyte, 0))
 
-aggregate group_by(Hour:format_time(EventTime, 'YYYY-MM-DD HH24:00:00')),
-  Events:count()
+// Create hour bucket from date and time
+make_col DateTime:Date + " " + Time
+make_col HourPart:split(Time, ":")[0]
+make_col Hour:Date + " " + HourPart + ":00:00"
+
+aggregate group_by(Hour),
+Events:count(),
+UniqueServices:count_distinct(Service),
+AllowEvents:sum(if(Action = "accept", 1, 0)),
+DenyEvents:sum(if(Action = "deny" or Action = "close", 1, 0)),
+TotalBytes:sum(SentBytes + RcvdBytes),
+AvgBytesPerEvent:avg(SentBytes + RcvdBytes)
+
+// Calculate spike detection metrics using window functions
+make_col TotalEvents:window(sum(Events))
+make_col HourCount:window(count())
+make_col AvgEventsPerHour:TotalEvents / HourCount
+make_col SpikeRatio:Events / AvgEventsPerHour
 
 sort asc(Hour)
+
+// Highlight potential spikes (events 3x above average)
+// Uncomment to filter for spikes only:
+// filter SpikeRatio > 3
