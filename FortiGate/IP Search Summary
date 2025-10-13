@@ -8,22 +8,22 @@ pick_col
 // =========================
 //Timestamp:string(FIELDS.timestamp),
 //Timestamp:string(replace(replace(FIELDS.timestamp, "T", " "), "Z", "")),
-Date:string(FIELDS.date),
-Time:string(FIELDS.time),
-DateTime:string(FIELDS.date) + " " + string(FIELDS.time),
-Action:string(FIELDS.action),
-LogType:string(FIELDS.type),
-SubType:string(FIELDS.subtype),
-LogDescription:string(FIELDS.logdesc),
-VPNUser:string(FIELDS.user),
-RemoteIP:string(FIELDS.remip),
-SourceIP:string(FIELDS.srcip),
-DestinationIP:string(FIELDS.dstip),
-DestinationHost:string(FIELDS.dst_host),
-Service:string(FIELDS.service),
-Protocol:string(FIELDS.proto),
-Outcome:string(FIELDS.reason),
-Message:string(FIELDS.message),
+    Date:string(FIELDS.date),
+    Time:string(FIELDS.time),
+    DateTime:string(FIELDS.date) + " " + string(FIELDS.time),
+    Action:string(FIELDS.action),
+    LogType:string(FIELDS.type),
+    SubType:string(FIELDS.subtype),
+    LogDescription:string(FIELDS.logdesc),
+    VPNUser:string(FIELDS.user),
+    RemoteIP:string(FIELDS.remip),
+    SourceIP:string(FIELDS.srcip),
+    DestinationIP:string(FIELDS.dstip),
+    DestinationHost:string(FIELDS.dst_host),
+    Service:string(FIELDS.service),
+    Protocol:string(FIELDS.proto),
+    Outcome:string(FIELDS.reason),
+    Message:string(FIELDS.message),
 
     // =========================
     // TIER 2 — VPN & TRAFFIC CONTEXT
@@ -88,28 +88,28 @@ dedup
 
 // Target IP identification using extracted columns (your corrected version)
 make_col target_ip_found: case(
-string(SourceIP) = "91.92.241.179" or string(SourceIP) = "64.190.113.235" or
-string(SourceIP) = "216.219.95.234" or string(SourceIP) = "157.250.195.229" or
-string(SourceIP) = "64.94.84.85" or string(SourceIP) = "96.62.214.11" or
-string(SourceIP) = "49.12.69.80", "SOURCE_MATCH",
-string(DestinationIP) = "91.92.241.179" or string(DestinationIP) = "64.190.113.235" or
-string(DestinationIP) = "216.219.95.234" or string(DestinationIP) = "157.250.195.229" or
-string(DestinationIP) = "64.94.84.85" or string(DestinationIP) = "96.62.214.11" or
-string(DestinationIP) = "49.12.69.80", "DEST_MATCH",
-string(RemoteIP) = "91.92.241.179" or string(RemoteIP) = "64.190.113.235" or
-string(RemoteIP) = "216.219.95.234" or string(RemoteIP) = "157.250.195.229" or
-string(RemoteIP) = "64.94.84.85" or string(RemoteIP) = "96.62.214.11" or
-string(RemoteIP) = "49.12.69.80", "REMOTE_MATCH",
-true, "NO_MATCH"
-)
+    string(SourceIP) = "91.92.241.179" or string(SourceIP) = "64.190.113.235" or
+    string(SourceIP) = "216.219.95.234" or string(SourceIP) = "157.250.195.229" or
+    string(SourceIP) = "64.94.84.85" or string(SourceIP) = "96.62.214.11" or
+    string(SourceIP) = "49.12.69.80", "SOURCE_MATCH",
+    string(DestinationIP) = "91.92.241.179" or string(DestinationIP) = "64.190.113.235" or
+    string(DestinationIP) = "216.219.95.234" or string(DestinationIP) = "157.250.195.229" or
+    string(DestinationIP) = "64.94.84.85" or string(DestinationIP) = "96.62.214.11" or
+    string(DestinationIP) = "49.12.69.80", "DEST_MATCH",
+    string(RemoteIP) = "91.92.241.179" or string(RemoteIP) = "64.190.113.235" or
+    string(RemoteIP) = "216.219.95.234" or string(RemoteIP) = "157.250.195.229" or
+    string(RemoteIP) = "64.94.84.85" or string(RemoteIP) = "96.62.214.11" or
+    string(RemoteIP) = "49.12.69.80", "REMOTE_MATCH",
+    true, "NO_MATCH"
+    )
 
 // Get the actual target IP value
 make_col target_ip: case(
-target_ip_found = "SOURCE_MATCH", SourceIP,
-target_ip_found = "DEST_MATCH", DestinationIP,
-target_ip_found = "REMOTE_MATCH", RemoteIP,
-true, "NO_MATCH"
-)
+    target_ip_found = "SOURCE_MATCH", SourceIP,
+    target_ip_found = "DEST_MATCH", DestinationIP,
+    target_ip_found = "REMOTE_MATCH", RemoteIP,
+    true, "NO_MATCH"
+    )
 
 // Filter to only show target IPs
 filter target_ip_found != "NO_MATCH"
