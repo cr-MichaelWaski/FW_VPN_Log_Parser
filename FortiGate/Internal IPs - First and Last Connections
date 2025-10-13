@@ -1,0 +1,54 @@
+// External IP First and Last Connection Analysis
+// Purpose: Show the VERY FIRST and VERY LAST time each IP appears in logs
+// Complete timeline view - absolute first and last appearances
+
+// Extract field values with proper casting
+make_col srcip: string(FIELDS.srcip)
+make_col dstip: string(FIELDS.dstip)
+make_col date: string(FIELDS.date)
+make_col time: string(FIELDS.time)
+
+// Create a combined datetime string for proper sorting
+make_col datetime: date + " " + time
+
+// Check if source IP is one of our targets
+make_col IsTargetSrc:
+  (srcip = "91.92.241.179" or srcip = "64.190.113.235" or srcip = "216.219.95.234" or
+   srcip = "157.250.195.229" or srcip = "64.94.84.85" or srcip = "96.62.214.11" or
+   srcip = "49.12.69.80")
+
+// Check if destination IP is one of our targets
+make_col IsTargetDst:
+  (dstip = "91.92.241.179" or dstip = "64.190.113.235" or dstip = "216.219.95.234" or
+   dstip = "157.250.195.229" or dstip = "64.94.84.85" or dstip = "96.62.214.11" or
+   dstip = "49.12.69.80")
+
+// Filter logs for connections involving target IPs
+filter IsTargetSrc or IsTargetDst
+
+// Identify which IP is the target one
+make_col target_ip: case(
+    IsTargetSrc, srcip,
+    IsTargetDst, dstip,
+    true, "unknown"
+)
+
+// Aggregate to get ABSOLUTE first and last appearances across ALL your logs
+aggregate group_by(target_ip),
+  absolute_first_seen: min(datetime),
+  absolute_last_seen: max(datetime),
+  total_appearances: count(),
+  days_active: count_distinct(date),
+  unique_timestamps: count_distinct(datetime)
+
+// Calculate the complete timeline span
+make_col timeline_span: case(
+    absolute_first_seen = absolute_last_seen, "Only seen once",
+    days_active = 1, "Single day activity",
+    days_active < 7, "Short-term activity (< 1 week)",
+    days_active < 30, "Medium-term activity (< 1 month)",
+    true, "Long-term activity (> 1 month)"
+)
+
+// Sort by absolute first appearance
+sort absolute_first_seen
