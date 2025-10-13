@@ -114,58 +114,107 @@ true, "NO_MATCH"
 // Filter to only show target IPs
 filter target_ip_found != "NO_MATCH"
 
-// Map to timeline headers format
-make_col EventTimeUTC: DateTime
-make_col Hostname: case(
-not is_null(DeviceName) and DeviceName != "" and DeviceName != "null", DeviceName,
-not is_null(GL2SourceNode) and GL2SourceNode != "" and GL2SourceNode != "null", GL2SourceNode,
-not is_null(DeviceID) and DeviceID != "" and DeviceID != "null", "Device-" + DeviceID,
-not is_null(GL2SourceInput) and GL2SourceInput != "" and GL2SourceInput != "null", GL2SourceInput,
-not is_null(VirtualDomain) and VirtualDomain != "" and VirtualDomain != "null", "VDom-" + VirtualDomain,
-true, "FortiGate-Firewall"
-)
-make_col Username: case(
-not is_null(VPNUser) and VPNUser != "", VPNUser,
-true, ""
-)
-make_col EventType: case(
-LogType = "traffic", "Network Traffic",
-LogType = "event" and SubType = "vpn", "VPN Event",
-LogType = "event" and SubType = "system", "System Event",
-LogType = "utm", "Security Event",
-not is_null(Action) and Action != "", "Firewall " + Action,
-true, "Firewall Log"
-)
-make_col EventDetails: case(
-not is_null(Message) and Message != "", Message,
-not is_null(LogDescription) and LogDescription != "", LogDescription,
-not is_null(Service) and Service != "", "Service: " + Service + " Protocol: " + Protocol,
-true, "Target IP activity detected"
-)
-make_col EventNotes: case(
-target_ip_found = "SOURCE_MATCH", "Target IP as source - " + Action + " - " + Service,
-target_ip_found = "DEST_MATCH", "Target IP as destination - " + Action + " - " + Service,
-target_ip_found = "REMOTE_MATCH", "Target IP as remote (VPN) - " + Action,
-true, "Target IP detected"
-)
-make_col SourceIPField: SourceIP
-make_col DestinationIPField: DestinationIP
-make_col HashValue: case(
-not is_null(SessionID) and SessionID != "", SessionID,
-not is_null(LogID) and LogID != "", LogID,
-true, ""
-)
-make_col UserSID: case(
-not is_null(PolicyID) and PolicyID != "", PolicyID,
-true, ""
-)
-make_col URL: case(
-not is_null(DestinationHost) and DestinationHost != "", DestinationHost,
-true, ""
+// Calculate data flow direction for each IP
+make_col data_in_bytes: case(
+    target_ip_found = "DEST_MATCH", SentBytes,  // When target is destination, incoming data
+    target_ip_found = "SOURCE_MATCH", ReceivedBytes,  // When target is source, data they received from us
+    true, 0
 )
 
-// Sort by timestamp
-sort EventTimeUTC
+make_col data_out_bytes: case(
+    target_ip_found = "SOURCE_MATCH", SentBytes,  // When target is source, outgoing data  
+    target_ip_found = "DEST_MATCH", ReceivedBytes,  // When target is destination, data they sent back
+    true, 0
+)
 
-// Select only the timeline columns
-pick_col EventTimeUTC, Hostname, Username, EventType, EventDetails, EventNotes, SourceIPField, DestinationIPField, HashValue, UserSID, URL
+// Summary aggregation by IP
+aggregate group_by(target_ip),
+  first_seen_in_log: min(DateTime),
+  last_seen_in_logs: max(DateTime),
+  total_events: count(),
+  data_in_total: sum(data_in_bytes),
+  data_out_total: sum(data_out_bytes)
+
+// ───────── Geo + ASN Lookup Tables ─────────
+
+// MaxMind Geo DB
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// ASN DB
+@asn_ipv4_v2_sq <- @asn_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    autonomous_system_organization:last_not_null(autonomous_system_organization),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// Map target_ip → Geo + ASN
+@target_geo <- @{
+  filter not is_null(target_ip)
+  make_col ip:parse_ip(target_ip)
+  filter int64(ip.family) = 4
+  make_col ipv4:int64(ip.ip_fields[0])
+
+  join
+    on(ipv4 >= @city_ipv4_v2_sq.network_start and ipv4 <= @city_ipv4_v2_sq.network_end),
+    Country:@city_ipv4_v2_sq.country_name,
+    City:@city_ipv4_v2_sq.city_name,
+    State:@city_ipv4_v2_sq.subdivision_1_name
+
+  join
+    on(ipv4 >= @asn_ipv4_v2_sq.network_start and ipv4 <= @asn_ipv4_v2_sq.network_end),
+    ASN:@asn_ipv4_v2_sq.autonomous_system_organization
+
+  statsby
+    Country:any_not_null(Country),
+    City:any_not_null(City),
+    State:any_not_null(State),
+    ASN:any_not_null(ASN),
+    group_by(target_ip)
+}
+
+// ───────── Attach Geo Data ─────────
+leftjoin
+  on(target_ip=@target_geo.target_ip),
+  Country:@target_geo.Country,
+  City:@target_geo.City,
+  State:@target_geo.State,
+  ASN:@target_geo.ASN
+
+// Convert bytes to MB for readability
+make_col data_in_mb: data_in_total / (1024 * 1024)
+make_col data_out_mb: data_out_total / (1024 * 1024)
+
+// Create final summary columns matching your headers
+make_col IP: target_ip
+make_col first_seen_in_log: first_seen_in_log
+make_col last_seen_in_logs: last_seen_in_logs
+make_col data_in: case(
+    data_in_mb < 0.01, "<0.01 MB",
+    data_in_mb < 1, string(round(data_in_mb, 2)) + " MB",
+    data_in_mb < 1024, string(round(data_in_mb, 1)) + " MB", 
+    true, string(round(data_in_mb / 1024, 2)) + " GB"
+)
+make_col data_out: case(
+    data_out_mb < 0.01, "<0.01 MB",
+    data_out_mb < 1, string(round(data_out_mb, 2)) + " MB",
+    data_out_mb < 1024, string(round(data_out_mb, 1)) + " MB",
+    true, string(round(data_out_mb / 1024, 2)) + " GB"
+)
+
+// Sort by first seen
+sort first_seen_in_log
+
+// Display summary table with geolocation
+pick_col IP, Country, City, ASN, first_seen_in_log, last_seen_in_logs, data_in, data_out
