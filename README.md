@@ -2,7 +2,7 @@
 
 A comprehensive collection of OPAL queries for analyzing FortiGate firewall and VPN logs in Observe. This toolkit transforms basic log analysis into enterprise-grade security intelligence with automated threat detection, risk assessment, and behavioral analysis.
 
-## 🚀 Features
+##  Features
 
 - **Automated Threat Detection** - Intelligent scoring and classification of security threats
 - **Geographic Intelligence** - Complete geo-location analysis with ASN and anonymous proxy detection
@@ -11,37 +11,37 @@ A comprehensive collection of OPAL queries for analyzing FortiGate firewall and 
 - **Data Exfiltration Detection** - Advanced analysis of suspicious data transfer patterns
 - **Network Flow Intelligence** - Comprehensive communication flow analysis
 
-## 📊 Analytics Categories
+##  Analytics Categories
 
-### 🔍 **Threat Intelligence & Source Analysis**
+###  **Threat Intelligence & Source Analysis**
 
 - **[Source IP Threat Intelligence Analysis](FortiGate/Source%20IP%20Threat%20Intelligence%20Analysis)** - Advanced source IP threat detection with automated risk scoring
 - **[Remote IP Threat Intelligence Analysis](FortiGate/Remote%20IP%20Threat%20Intelligence%20Analysis)** - External IP behavior analysis and scanning detection
 - **[Remote IPs targeting the most users](FortiGate/Remote%20IPs%20targeting%20the%20most%20users)** - Multi-target attack detection and campaign analysis
 
-### 📈 **Traffic Analysis & Data Flow**
+###  **Traffic Analysis & Data Flow**
 
 - **[Biggest data movers (bytes)](<FortiGate/Biggest%20data%20movers%20(bytes)>)** - High-volume data transfer analysis with geo-intelligence
 - **[Bytes sent vs received (exfil quick check)](<FortiGate/Bytes%20sent%20vs%20received%20(exfil%20quick%20check)>)** - Data exfiltration detection and baseline analysis
 - **[Hourly Communication Flow Intelligence](FortiGate/Hourly%20Communication%20Flow%20Intelligence)** - Comprehensive network flow analysis by hour
 
-### 🛡️ **Security Posture & Policy Analysis**
+###  **Security Posture & Policy Analysis**
 
 - **[Firewall Security Posture Analysis](FortiGate/Firewall%20Security%20Posture%20Analysis)** - Overall security stance assessment with policy effectiveness
 - **[Top policies causing denies-resets](FortiGate/Top%20policies%20causing%20denies-resets)** - Policy performance and threat blocking analysis
 - **[Service and Action Anomaly Detection](FortiGate/Service%20and%20Action%20Anomaly%20Detection)** - Behavioral anomaly detection with baseline comparison
 
-### ⏰ **Temporal & Trend Analysis**
+###  **Temporal & Trend Analysis**
 
 - **[Timeframe](FortiGate/Timeframe)** - Log coverage analysis and temporal boundaries
 - **[Hourly trend (quick spike scan)](<FortiGate/Hourly%20trend%20(quick%20spike%20scan)>)** - Traffic spike detection and hourly pattern analysis
 
-### 🌐 **Geographic & Destination Analysis**
+###  **Geographic & Destination Analysis**
 
 - **[Top DestinationIP on 2025-08-18](FortiGate/Top%20DestinationIP%20on%202025-08-18)** - Destination analysis with enhanced geo-intelligence
 - **[Remote IPs in window (first seen)](<FortiGate/Remote%20IPs%20in%20window%20(first%20seen)>)** - New threat detection and first-seen analysis
 
-## 🔧 Setup & Requirements
+##  Setup & Requirements
 
 ### Prerequisites
 
@@ -70,7 +70,7 @@ FIELDS.policyname    - Policy name
 FIELDS.srccountry    - Source country (if available)
 ```
 
-## 📖 Usage Guide
+##  Usage Guide
 
 ### Quick Start
 
@@ -81,7 +81,7 @@ FIELDS.srccountry    - Source country (if available)
 
 ### Common Usage Patterns
 
-#### 🚨 **Threat Hunting**
+####  **Threat Hunting**
 
 ```opal
 // Hunt for high-risk sources
@@ -94,7 +94,7 @@ filter ThreatScore = "HIGH_SCANNING"
 filter Country = "Russia" or Country = "China"
 ```
 
-#### 📊 **Security Assessment**
+####  **Security Assessment**
 
 ```opal
 // Check security posture
@@ -107,7 +107,7 @@ filter PolicyType = "GLOBAL_THREAT_BLOCKER"
 filter AnomalyType != "NORMAL"
 ```
 
-#### 🔍 **Data Exfiltration Detection**
+####  **Data Exfiltration Detection**
 
 ```opal
 // Large outbound transfers
@@ -117,9 +117,9 @@ filter TotalSent > 1000000 and ExfilRatio > 5
 filter FlowType = "UPLOAD_HEAVY" and CommunicationPattern = "INTERNATIONAL_FLOW"
 ```
 
-## 🎯 Key Features by Query
+##  Key Features by Query
 
-### 🔥 **Automated Threat Scoring**
+###  **Automated Threat Scoring**
 
 All queries include intelligent threat classification:
 
@@ -128,7 +128,7 @@ All queries include intelligent threat classification:
 - `BLOCKED_ATTACKER` - Persistent blocked sources
 - `PROXY_SCANNING` - Anonymous proxy-based threats
 
-### 🌍 **Geographic Intelligence**
+###  **Geographic Intelligence**
 
 Enhanced with MaxMind GeoIP data:
 
@@ -137,7 +137,7 @@ Enhanced with MaxMind GeoIP data:
 - ASN and hosting provider identification
 - International vs domestic traffic analysis
 
-### 📈 **Pattern Recognition**
+###  **Pattern Recognition**
 
 Advanced behavioral analysis:
 
@@ -146,7 +146,7 @@ Advanced behavioral analysis:
 - Service targeting analysis
 - Temporal attack patterns
 
-## 🛠️ Customization
+##  Customization
 
 ### Adjusting Thresholds
 
@@ -193,7 +193,7 @@ filter Country in ("Russia", "China", "North Korea")
 filter ASN in ("M247 Europe SRL", "AMAZON-02")
 ```
 
-## 📊 Output Interpretation
+##  Output Interpretation
 
 ### Threat Scores
 
@@ -216,7 +216,7 @@ filter ASN in ("M247 Europe SRL", "AMAZON-02")
 - **BULK_DATA_TRANSFER** - File transfer patterns
 - **PERSISTENT_BLOCKED** - Ongoing attack attempts
 
-## 🔒 Security Use Cases
+##  Security Use Cases
 
 ### 1. **Daily Threat Assessment**
 
@@ -241,55 +241,3 @@ filter ASN in ("M247 Europe SRL", "AMAZON-02")
 - Remote IP Threat Intelligence for external threats
 - Policy analysis for attack vectors
 - Anomaly detection for unknown threats
-
-## 📝 Best Practices
-
-### Performance Optimization
-
-- Use specific time windows rather than broad date ranges
-- Apply geographic filters early in queries
-- Limit results with appropriate limits (100-500 records)
-
-### Threshold Tuning
-
-- Start with default thresholds and adjust based on your environment
-- Monitor false positive rates and tune accordingly
-- Consider baseline establishment periods for anomaly detection
-
-### Regular Analysis
-
-- Daily security posture reviews
-- Weekly threat intelligence analysis
-- Monthly policy effectiveness assessments
-- Quarterly baseline updates
-
-## 🚨 Alert Integration
-
-Consider setting up automated alerts for:
-
-- High-risk threat scores
-- Anomaly detection triggers
-- Large data transfer volumes
-- International communication spikes
-- Policy effectiveness degradation
-
-## 🤝 Contributing
-
-This toolkit is designed to be customized for your specific environment. Common modifications include:
-
-- Adjusting threat detection thresholds
-- Adding custom geographic filters
-- Incorporating additional data sources
-- Creating environment-specific classifications
-
-## 📞 Support
-
-For questions about OPAL syntax or Observe platform features, refer to the Observe documentation or contact your Observe support team.
-
-## 📄 License
-
-This project is provided as-is for security analysis purposes. Modify and adapt as needed for your organization's requirements.
-
----
-
-**⚡ Transform your FortiGate logs from basic monitoring into enterprise-grade security intelligence!**
