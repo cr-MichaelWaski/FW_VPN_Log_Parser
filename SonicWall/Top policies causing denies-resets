@@ -1,0 +1,32 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  Date:string(coalesce(src.date, format_time(parse_isotime(string(src["@timestamp"])), 'YYYY-MM-DD'))),
+  Time:string(coalesce(src.time, format_time(parse_isotime(string(src["@timestamp"])), 'HH24:MI:SS'))),
+  PolicyID:string(src.rule.id),
+  PolicyName:string(src.rule.name),
+  Action:string(src.event.action),
+  SourceIP:string(src.source.address),
+  DestinationIP:string(src.destination.address),
+  Service:string(src.network.protocol),
+  DestinationPort:string(src.destination.port),
+  SourceCountry:string(src.source.geo.country_name),
+  Protocol:string(src.network.transport)
+
+filter lower(string(Action)) in ("deny", "blocked", "reset", "close", "connection refused", "drop")
+
+aggregate group_by(PolicyID, PolicyName, Action),
+  Events:count(),
+  UniqueSrc:count_distinct(SourceIP),
+  UniqueDst:count_distinct(DestinationIP)
+
+sort desc(Events)

@@ -1,0 +1,41 @@
+make_col path:lower(string(EXTRA.path))
+filter
+contains(path, "sonic")
+or contains(path, "sonicwall")
+or lower(string(FIELDS.vendor)) = "sonicwall"
+or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+EventTime:parse_isotime(string(src["@timestamp"])),
+User:string(coalesce(src.user.name, src.user.id)),
+SourceIP:string(src.source.address),
+DestinationIP:string(src.destination.address),
+SrcRole:string(src.source.zone.role),
+DstRole:string(src.destination.zone.role),
+SrcIf:string(src.source.interface),
+DstIf:string(src.destination.interface),
+SubType:string(src.event.type)
+
+// Derive RemoteIP: prefer WAN-side IP if zones are present
+make_col src_if_l:lower(string(SrcIf)), dst_if_l:lower(string(DstIf)), src_role_l:lower(string(SrcRole)), dst_role_l:lower(string(DstRole))
+make_col src_is_wan:(src_role_l = "wan" or src_if_l = "x1"),
+dst_is_wan:(dst_role_l = "wan" or dst_if_l = "x1")
+make_col RemoteIP:string(coalesce(
+if(src_is_wan, SourceIP, ""),
+if(dst_is_wan, DestinationIP, ""),
+SourceIP
+))
+
+filter not is_null(EventTime) and not is_null(User) and not is_null(RemoteIP)
+
+aggregate group_by(RemoteIP),
+UniqueUsers:count_distinct(User),
+Events:count(),
+ExampleUser:any(User),
+ExampleDst:any(DestinationIP)
+
+sort desc(UniqueUsers), desc(Events)

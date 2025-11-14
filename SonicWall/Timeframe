@@ -1,0 +1,17 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col EventTime:parse_isotime(string(src["@timestamp"]))
+
+aggregate group_by(),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime),
+  Days:datediff('day', FirstSeen, LastSeen)

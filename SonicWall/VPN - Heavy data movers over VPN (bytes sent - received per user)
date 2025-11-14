@@ -1,0 +1,29 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(src["@timestamp"])),
+  SubType:string(src.event.type),
+  User:string(coalesce(src.user.name, src.user.id)),
+  SentBytes:int64(coalesce(src.source.bytes, 0)),
+  RcvdBytes:int64(coalesce(src.destination.bytes, 0))
+
+make_col subtype_l:lower(string(SubType))
+filter not is_null(EventTime) and (subtype_l = "vpn" or contains(subtype_l, "vpn")) and not is_null(User)
+
+aggregate group_by(User),
+  TotalSent:sum(SentBytes),
+  TotalRcvd:sum(RcvdBytes),
+  Events:count()
+
+make_col ExfilRatio:if(TotalRcvd = 0, 9999999, TotalSent / max(1, TotalRcvd))
+
+sort desc(TotalSent)

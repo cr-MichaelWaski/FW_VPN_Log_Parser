@@ -1,0 +1,36 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(src["@timestamp"])),
+  SubType:string(src.event.type),
+  Action:string(src.event.action),
+  User:string(coalesce(src.user.name, src.user.id)),
+  RemoteIP:string(src.source.address)
+
+// Focus on VPN auth successes
+make_col action_l:lower(string(Action))
+make_col IsSuccess:(action_l = "tunnel-up" or action_l = "login")
+filter not is_null(EventTime) and IsSuccess and (
+  contains(lower(string(SubType)), "vpn") or contains(lower(string(Action)), "vpn")
+)
+
+// Customize off-hours window (00:00-06:00 local by default)
+make_col Hour:int64(format_time(EventTime, 'HH24'))
+filter Hour >= 0 and Hour < 6
+
+aggregate group_by(User, Hour),
+  Successes:count(),
+  RemoteIPs:array_agg_distinct(RemoteIP),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime)
+
+sort desc(Successes)

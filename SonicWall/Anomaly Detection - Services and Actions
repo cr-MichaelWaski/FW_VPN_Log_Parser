@@ -1,0 +1,43 @@
+// Simple frequency anomaly scan over Services and Actions
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(src["@timestamp"])),
+  Service:string(src.network.protocol),
+  Action:string(src.event.action)
+
+filter not is_null(EventTime)
+make_col HourBucket:format_time(EventTime, 'YYYY-MM-DD HH24')
+
+aggregate group_by(HourBucket, Service, Action), Cnt:count()
+
+// Compute per-Service baseline using last 7 days (adjust in UI)
+// For simplicity, derive a rolling baseline approximation in-window
+make_col ServiceKey:string(Service)
+
+statsby
+  p50:median(Cnt),
+  p90:percentile(Cnt, 90),
+  p99:percentile(Cnt, 99),
+  group_by(ServiceKey)
+
+join on(ServiceKey = Service), Baseline50:p50, Baseline90:p90, Baseline99:p99
+
+make_col AnomalyType:case(
+  Cnt >= coalesce(Baseline99, Baseline90, Baseline50) * 5, "SEVERE_SPIKE",
+  Cnt >= coalesce(Baseline99, Baseline90, Baseline50) * 3, "MAJOR_SPIKE",
+  Cnt >= coalesce(Baseline99, Baseline90, Baseline50) * 2, "MINOR_SPIKE",
+  true, "NORMAL"
+)
+
+filter AnomalyType != "NORMAL"
+sort desc(Cnt)

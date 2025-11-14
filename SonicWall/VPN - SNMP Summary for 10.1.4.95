@@ -1,0 +1,47 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(src["@timestamp"])),
+  SourceIP:string(src.source.address),
+  DestinationIP:string(src.destination.address),
+  Service:string(src.network.protocol),
+  DstPort:string(src.destination.port)
+
+// Configure target host here
+make_col TargetHost:"10.1.4.95"
+
+filter DestinationIP = TargetHost
+  and (
+    lower(Service) = "snmp" or DstPort = "161" or DstPort = "162"
+  )
+  and not is_null(EventTime)
+
+aggregate group_by(DestinationIP),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime),
+  Events:count(),
+  DistinctSources:count_distinct(SourceIP),
+  Sources:array_agg_distinct(SourceIP)
+
+make_col
+  FirstSeenUTC:format_time(FirstSeen, 'YYYY-MM-DD HH24:MI:SS'),
+  LastSeenUTC:format_time(LastSeen, 'YYYY-MM-DD HH24:MI:SS')
+
+pick_col
+  DestinationIP,
+  FirstSeenUTC,
+  LastSeenUTC,
+  DistinctSources,
+  Sources,
+  Events
+
+sort asc(FirstSeenUTC)

@@ -1,0 +1,24 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  Action:string(src.event.action)
+
+make_col action_l:lower(string(Action))
+make_col Verdict:case(
+  action_l in ("accept", "allow", "permit", "connection opened", "open"), "ALLOW",
+  action_l in ("deny", "blocked", "reset", "close", "connection refused", "drop"), "DENY",
+  true, upper(string(Action))
+)
+
+aggregate group_by(Verdict), Events:count()
+
+sort desc(Events)

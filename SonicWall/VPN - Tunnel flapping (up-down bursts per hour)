@@ -1,0 +1,30 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(src["@timestamp"])),
+  SubType:string(src.event.type),
+  Action:string(src.event.action),
+  User:string(coalesce(src.user.name, src.user.id))
+
+make_col action_l:lower(string(Action))
+make_col IsUp:(action_l = "tunnel-up" or contains(action_l, "up"))
+make_col IsDown:(action_l = "tunnel-down" or contains(action_l, "down"))
+filter not is_null(EventTime) and contains(lower(string(SubType)), "vpn") and (IsUp or IsDown)
+
+make_col HourBucket:format_time(EventTime, 'YYYY-MM-DD HH24')
+aggregate group_by(User, HourBucket),
+  Ups:sum(if(IsUp, 1, 0)),
+  Downs:sum(if(IsDown, 1, 0))
+
+make_col Flaps:abs(Ups - Downs)
+filter (Ups + Downs) >= 5 and Flaps >= 3
+sort desc(Flaps), desc(Ups), desc(Downs)

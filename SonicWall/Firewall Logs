@@ -1,0 +1,87 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+// Parse the SonicWall payload
+make_col sw:object(parse_json(FIELDS.value))
+
+// Pull out the inner "source" object
+make_col src:sw.source
+
+make_table
+pick_col
+  Timestamp:string(replace(replace(string(src["@timestamp"]), "T", " "), "Z", "")),
+  Action:string(src.event.action),
+  LogType:string(src.event.category),
+  SubType:string(src.event.type),
+  LogDescription:string(coalesce(src.message, src.event.original)),
+  VPNUser:string(src.user),
+  RemoteIP:string(coalesce(src.source.address, src.destination.address)),
+  SourceIP:string(src.source.address),
+  DestinationIP:string(src.destination.address),
+  DestinationHost:string(src.destination.domain),
+  Service:string(src.network.protocol),
+  Protocol:string(src.network.transport),
+  Outcome:string(src.event.outcome),
+  Message:string(src.message),
+
+  VPNGroup:string(src.vpn_group),
+  TunnelID:string(src.tunnel_id),
+  TunnelType:string(src.vpn_type),
+  VPNMsg:string(src.message),
+  SourcePort:string(src.source.port),
+  DestinationPort:string(src.destination.port),
+  SourceInterface:string(src.source.interface),
+  SourceInterfaceRole:string(src.source.zone),
+  DestinationInterface:string(src.destination.interface),
+  DestinationInterfaceRole:string(src.destination.zone),
+  SourceCountry:string(src.source.geo.country_name),
+  DestinationCountry:string(src.destination.geo.country_name),
+  DestinationMAC:string(src.destination.mac),
+  SourceMAC:string(src.source.mac),
+
+  PolicyID:string(src.rule.id),
+  PolicyName:string(src.rule.name),
+  PolicyType:string(src.rule.type),
+  PolicyUUID:string(src.rule.uuid),
+  SessionID:string(src.session_id),
+  TranslatedIP:string(src.nat.ip),
+  TranslatedPort:string(src.nat.port),
+  TranslationDisposition:string(src.nat.disposition),
+  ReceivedBytes:int64(coalesce(src.destination.bytes, 0)),
+  SentBytes:int64(coalesce(src.source.bytes, 0)),
+  ReceivedPackets:int64(coalesce(src.destination.packets, 0)),
+  SentPackets:int64(coalesce(src.source.packets, 0)),
+
+  DeviceName:string(src.observer.name),
+  DeviceID:string(src.observer.ip),
+  SerialNumber:string(src.observer.serial_number),
+  SourceDevice:string(src.source.device),
+  LogID:string(src.event.code),
+  LogLevel:string(src.log.syslog.severity.name),
+  EventTime:string(src["@timestamp"]),
+  Timezone:string(src.event.timezone),
+  VirtualDomain:string(src.vdom),
+  Facility:string(src.log.syslog.facility.name),
+  FacilityNum:string(src.log.syslog.facility.code),
+
+  NeqterLabel:string(src.neqter.label),
+  NeqterType:string(src.neqter.type),
+  EventKind:string(src.event.kind),
+  EventOriginal:string(src.event.original),
+
+  GL2MessageID:string(FIELDS.gl2_message_id),
+  GL2AccountedMessageSize:int64(FIELDS.gl2_accounted_message_size),
+  GL2ProcessingTimestamp:string(FIELDS.gl2_processing_timestamp),
+  GL2ReceiveTimestamp:string(FIELDS.gl2_receive_timestamp),
+  GL2ProcessingDuration:int64(FIELDS.gl2_processing_duration_ms),
+  GL2RemoteIP:string(FIELDS.gl2_remote_ip),
+  GL2RemotePort:string(FIELDS.gl2_remote_port),
+  GL2SourceInput:string(FIELDS.gl2_source_input),
+  GL2SourceNode:string(FIELDS.gl2_source_node),
+  RAW:FIELDS
+
+dedup

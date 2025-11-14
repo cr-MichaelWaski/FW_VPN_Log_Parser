@@ -1,0 +1,31 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(src["@timestamp"])),
+  SourceIP:string(src.source.address),
+  DestinationIP:string(src.destination.address),
+  Service:string(src.network.protocol),
+  Protocol:string(src.network.transport),
+  SrcPort:string(src.source.port),
+  DstPort:string(src.destination.port),
+  SentBytes:int64(coalesce(src.source.bytes, 0)),
+  RcvdBytes:int64(coalesce(src.destination.bytes, 0))
+
+filter not is_null(EventTime)
+make_col HourBucket:format_time(EventTime, 'YYYY-MM-DD HH24')
+
+aggregate group_by(HourBucket, SourceIP, DestinationIP, Service, Protocol, DstPort),
+  Events:count(),
+  TotalSent:sum(SentBytes),
+  TotalRcvd:sum(RcvdBytes)
+
+sort desc(Events), desc(TotalSent)

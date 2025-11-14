@@ -1,0 +1,66 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  SourceIP:string(src.source.address),
+  DestinationIP:string(src.destination.address),
+  Service:string(src.network.protocol)
+
+filter not is_null(SourceIP)
+
+// --- Geo lookup table (collapsed) ---
+@city_ipv4_v2_sq <- @city_ipv4{
+  statsby
+    network_start:any_not_null(network_start),
+    network_end:any_not_null(network_end),
+    country_name:last_not_null(country_name),
+    city_name:last_not_null(city_name),
+    subdivision_1_name:last_not_null(subdivision_1_name),
+    group_by(network)
+  add_key network_start, network_end
+}
+
+// --- SourceIP → Geo ---
+@src_geo <- @{
+  make_col src_net:parse_ip(SourceIP)
+  filter int64(src_net.family) = 4
+  make_col ipv4_int:int64(src_net.ip_fields[0])
+  join
+    on(ipv4_int >= @city_ipv4_v2_sq.network_start and ipv4_int <= @city_ipv4_v2_sq.network_end),
+    src_country:@city_ipv4_v2_sq.country_name,
+    src_city:@city_ipv4_v2_sq.city_name,
+    src_state:@city_ipv4_v2_sq.subdivision_1_name
+  statsby
+    SrcCountry:any_not_null(src_country),
+    SrcCity:any_not_null(src_city),
+    SrcState:any_not_null(src_state),
+    group_by(SourceIP)
+}
+
+leftjoin on(SourceIP=@src_geo.SourceIP),
+  SrcCountry:@src_geo.SrcCountry,
+  SrcCity:@src_geo.SrcCity,
+  SrcState:@src_geo.SrcState
+
+aggregate group_by(SourceIP, SrcCountry, SrcCity, SrcState),
+  Events:count(),
+  UniqueDestinations:count_distinct(DestinationIP),
+  UniqueServices:count_distinct(Service)
+
+make_col ThreatScore:case(
+  UniqueDestinations > 50 and UniqueServices > 10, "HIGH_SCANNING",
+  UniqueDestinations > 20 and UniqueServices > 5, "MODERATE_SCANNING",
+  UniqueDestinations > 10, "POTENTIAL_SCANNING",
+  UniqueServices > 5, "SERVICE_PROBING",
+  true, "NORMAL"
+)
+
+sort desc(Events), desc(UniqueDestinations)

@@ -1,0 +1,34 @@
+// Provide quick summary for a specific IP (source or destination)
+// Replace the value below or add a parameterized variable in your workspace
+make_col TargetIP:"1.2.3.4"
+
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(src["@timestamp"])),
+  SourceIP:string(src.source.address),
+  DestinationIP:string(src.destination.address),
+  Action:string(src.event.action),
+  Service:string(src.network.protocol),
+  DstPort:string(src.destination.port),
+  BytesOut:int64(coalesce(src.source.bytes, 0)),
+  BytesIn:int64(coalesce(src.destination.bytes, 0))
+
+filter not is_null(EventTime) and (SourceIP = TargetIP or DestinationIP = TargetIP)
+
+aggregate group_by(TargetIP),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime),
+  TotalEvents:count(),
+  UniquePeers:count_distinct(if(SourceIP = TargetIP, DestinationIP, SourceIP)),
+  TotalBytesOut:sum(BytesOut),
+  TotalBytesIn:sum(BytesIn)

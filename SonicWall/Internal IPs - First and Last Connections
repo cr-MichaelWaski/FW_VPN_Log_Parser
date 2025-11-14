@@ -1,0 +1,36 @@
+// Summarize first/last seen for internal source IPs (adjust RFC1918 filters as needed)
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  EventTime:parse_isotime(string(src["@timestamp"])),
+  SourceIP:string(src.source.address),
+  DestinationIP:string(src.destination.address)
+
+filter not is_null(EventTime)
+
+make_col is_internal:case(
+  // RFC1918 ranges
+  cidr_contains("10.0.0.0/8", SourceIP), true,
+  cidr_contains("172.16.0.0/12", SourceIP), true,
+  cidr_contains("192.168.0.0/16", SourceIP), true,
+  true, false
+)
+
+filter is_internal
+
+aggregate group_by(SourceIP),
+  FirstSeen:min(EventTime),
+  LastSeen:max(EventTime),
+  Peers:count_distinct(DestinationIP),
+  Events:count()
+
+sort asc(FirstSeen)

@@ -1,0 +1,24 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  SourceIP:string(src.source.address),
+  DestinationIP:string(src.destination.address),
+  SentBytes:int64(coalesce(src.source.bytes, 0)),
+  RcvdBytes:int64(coalesce(src.destination.bytes, 0))
+
+aggregate group_by(SourceIP),
+  TotalSent:sum(SentBytes),
+  TotalRcvd:sum(RcvdBytes),
+  DestCount:count_distinct(DestinationIP)
+
+make_col ExfilRatio:if(TotalRcvd = 0, 9999999, TotalSent / max(1, TotalRcvd))
+sort desc(ExfilRatio), desc(TotalSent)

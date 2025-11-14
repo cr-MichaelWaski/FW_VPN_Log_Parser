@@ -1,0 +1,24 @@
+make_col path:lower(string(EXTRA.path))
+filter
+  contains(path, "sonic")
+  or contains(path, "sonicwall")
+  or lower(string(FIELDS.vendor)) = "sonicwall"
+  or lower(string(FIELDS["neqter.type"])) = "sonicwall"
+
+make_col sw:object(parse_json(FIELDS.value))
+make_col src:sw.source
+
+make_table
+pick_col
+  SourceIP:string(src.source.address),
+  SrcRole:string(src.source.zone.role),
+  SrcIf:string(src.source.interface)
+
+make_col src_if_l:lower(string(SrcIf)), src_role_l:lower(string(SrcRole))
+make_col is_wan:(src_role_l = "wan" or src_if_l = "x1")
+make_col RemoteIP:string(coalesce(if(is_wan, SourceIP, ""), SourceIP))
+filter not is_null(RemoteIP) and RemoteIP != ""
+
+aggregate group_by(RemoteIP), Events:count()
+
+sort desc(Events)
